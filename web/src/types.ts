@@ -40,22 +40,38 @@ export type View =
   | { kind: 'mine' }
   | { kind: 'saved' }
 
+export type Sort = 'newest' | 'price-asc' | 'price-desc' | 'year-desc' | 'mileage-asc'
+
+export const SORT_LABELS: Record<Sort, string> = {
+  'newest': 'Newest first',
+  'price-asc': 'Price: low to high',
+  'price-desc': 'Price: high to low',
+  'year-desc': 'Year: newest first',
+  'mileage-asc': 'Mileage: lowest first',
+}
+
 export interface Filters {
   q: string
   make: string
+  bodyType: string
+  fuelType: string
   minPrice: string
   maxPrice: string
   minYear: string
   maxYear: string
+  sort: Sort
 }
 
 export const EMPTY_FILTERS: Filters = {
   q: '',
   make: '',
+  bodyType: '',
+  fuelType: '',
   minPrice: '',
   maxPrice: '',
   minYear: '',
   maxYear: '',
+  sort: 'newest',
 }
 
 export const FUEL_TYPES = ['Petrol', 'Diesel', 'Hybrid', 'Electric', 'LPG', 'Other'] as const

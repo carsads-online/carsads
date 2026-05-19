@@ -9,7 +9,8 @@ import type {
   View,
   Filters,
 } from './types.ts'
-import { EMPTY_FILTERS, FUEL_TYPES, TRANSMISSIONS, BODY_TYPES } from './types.ts'
+import { EMPTY_FILTERS, FUEL_TYPES, TRANSMISSIONS, BODY_TYPES, SORT_LABELS } from './types.ts'
+import type { Sort } from './types.ts'
 import {
   formatPrice,
   formatMileage,
@@ -143,6 +144,7 @@ function CarsadsApp() {
           id={view.id}
           onBack={() => setView({ kind: 'browse' })}
           onEdit={id => setView({ kind: 'edit', id })}
+          onOpen={id => setView({ kind: 'detail', id })}
         />
       )}
       {view.kind === 'post' && (
@@ -255,17 +257,28 @@ function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
     const maxP = parsePrice(filters.maxPrice)
     const minY = parseInt0(filters.minYear) || 0
     const maxY = parseInt0(filters.maxYear) || 9999
-    return items.filter(l => {
+    const matched = items.filter(l => {
       if (filters.make && l.make !== filters.make) return false
+      if (filters.bodyType && l.body_type !== filters.bodyType) return false
+      if (filters.fuelType && l.fuel_type !== filters.fuelType) return false
       if (minP !== null && l.price_cents < minP) return false
       if (maxP !== null && l.price_cents > maxP) return false
       if (l.year < minY || l.year > maxY) return false
       if (q && !(l.title + ' ' + l.make + ' ' + l.model + ' ' + l.location).toLowerCase().includes(q)) return false
       return true
     })
+    const sorted = [...matched]
+    switch (filters.sort) {
+      case 'price-asc':    sorted.sort((a, b) => a.price_cents - b.price_cents); break
+      case 'price-desc':   sorted.sort((a, b) => b.price_cents - a.price_cents); break
+      case 'year-desc':    sorted.sort((a, b) => b.year - a.year); break
+      case 'mileage-asc':  sorted.sort((a, b) => a.mileage_km - b.mileage_km); break
+      case 'newest':       sorted.sort((a, b) => b.created_at - a.created_at); break
+    }
+    return sorted
   }, [items, filters])
 
-  const hasActiveFilters = filters.q !== '' || filters.make !== '' || filters.minPrice !== '' || filters.maxPrice !== '' || filters.minYear !== '' || filters.maxYear !== ''
+  const hasActiveFilters = filters.q !== '' || filters.make !== '' || filters.bodyType !== '' || filters.fuelType !== '' || filters.minPrice !== '' || filters.maxPrice !== '' || filters.minYear !== '' || filters.maxYear !== '' || filters.sort !== 'newest'
 
   return (
     <div>
@@ -311,55 +324,61 @@ function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
 
 function FilterBar({ filters, setFilters }: { filters: Filters; setFilters: (f: Filters) => void }) {
   const update = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch })
+  const inputClass = "rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
   return (
-    <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-7">
-      <input
-        type="text"
-        placeholder="Search…"
-        value={filters.q}
-        onChange={e => update({ q: e.target.value })}
-        className="col-span-2 rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm md:col-span-2"
-      />
-      <select
-        value={filters.make}
-        onChange={e => update({ make: e.target.value })}
-        className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
-      >
-        <option value="">Any make</option>
-        {COMMON_MAKES.map(m => <option key={m} value={m}>{m}</option>)}
-      </select>
-      <input
-        type="text"
-        inputMode="numeric"
-        placeholder="Min price"
-        value={filters.minPrice}
-        onChange={e => update({ minPrice: e.target.value })}
-        className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
-      />
-      <input
-        type="text"
-        inputMode="numeric"
-        placeholder="Max price"
-        value={filters.maxPrice}
-        onChange={e => update({ maxPrice: e.target.value })}
-        className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
-      />
-      <select
-        value={filters.minYear}
-        onChange={e => update({ minYear: e.target.value })}
-        className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
-      >
-        <option value="">Year from</option>
-        {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
-      </select>
-      <select
-        value={filters.maxYear}
-        onChange={e => update({ maxYear: e.target.value })}
-        className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
-      >
-        <option value="">Year to</option>
-        {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
-      </select>
+    <div className="mb-6 space-y-2">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <input
+          type="text"
+          placeholder="Search…"
+          value={filters.q}
+          onChange={e => update({ q: e.target.value })}
+          className={`col-span-2 ${inputClass}`}
+        />
+        <select value={filters.make} onChange={e => update({ make: e.target.value })} className={inputClass}>
+          <option value="">Any make</option>
+          {COMMON_MAKES.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select value={filters.sort} onChange={e => update({ sort: e.target.value as Sort })} className={inputClass}>
+          {(Object.keys(SORT_LABELS) as Sort[]).map(s => (
+            <option key={s} value={s}>{SORT_LABELS[s]}</option>
+          ))}
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
+        <select value={filters.bodyType} onChange={e => update({ bodyType: e.target.value })} className={inputClass}>
+          <option value="">Any body</option>
+          {BODY_TYPES.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select value={filters.fuelType} onChange={e => update({ fuelType: e.target.value })} className={inputClass}>
+          <option value="">Any fuel</option>
+          {FUEL_TYPES.map(f => <option key={f} value={f}>{f}</option>)}
+        </select>
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="Min price"
+          value={filters.minPrice}
+          onChange={e => update({ minPrice: e.target.value })}
+          className={inputClass}
+        />
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="Max price"
+          value={filters.maxPrice}
+          onChange={e => update({ maxPrice: e.target.value })}
+          className={inputClass}
+        />
+        <select value={filters.minYear} onChange={e => update({ minYear: e.target.value })} className={inputClass}>
+          <option value="">Year from</option>
+          {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <select value={filters.maxYear} onChange={e => update({ maxYear: e.target.value })} className={inputClass}>
+          <option value="">Year to</option>
+          {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
     </div>
   )
 }
@@ -396,11 +415,13 @@ function ListingCard({ listing, onClick }: { listing: ListingWithPhotos; onClick
 
 // ─── Detail ─────────────────────────────────────────────────────────────────
 
-function DetailView({ id, onBack, onEdit }: { id: string; onBack: () => void; onEdit: (id: string) => void }) {
+function DetailView({ id, onBack, onEdit, onOpen }: { id: string; onBack: () => void; onEdit: (id: string) => void; onOpen: (id: string) => void }) {
   const [data, setData] = useState<ListingWithPhotos | null | 'missing'>(null)
   const [me, setMe] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [photoIdx, setPhotoIdx] = useState(0)
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
+  const [similar, setSimilar] = useState<ListingWithPhotos[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -416,9 +437,48 @@ function DetailView({ id, onBack, onEdit }: { id: string; onBack: () => void; on
       setData({ ...l, photos })
       setMe(app.auth.user?.id ?? null)
       setSaved(!!fav)
+      setPhotoIdx(0)
+      setLightboxIdx(null)
+
+      // Fetch similar listings: same make OR same body_type, exclude self.
+      const similarRows = await dbQuery<Listing>(
+        `SELECT * FROM listings
+         WHERE status = 'active' AND id != ?
+           AND (make = ? OR body_type = ?)
+         ORDER BY created_at DESC LIMIT 3`,
+        [l.id, l.make, l.body_type],
+      )
+      if (cancelled || similarRows.length === 0) return
+      const similarIds = similarRows.map(r => r.id)
+      const similarPhotos = await dbQuery<ListingPhoto>(
+        `SELECT * FROM listing_photos WHERE listing_id IN (${similarIds.map(() => '?').join(',')}) ORDER BY position ASC`,
+        similarIds,
+      )
+      const byId = new Map<string, ListingPhoto[]>()
+      for (const p of similarPhotos) {
+        if (!byId.has(p.listing_id)) byId.set(p.listing_id, [])
+        byId.get(p.listing_id)!.push(p)
+      }
+      if (!cancelled) setSimilar(similarRows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
     })()
     return () => { cancelled = true }
   }, [id])
+
+  // Keyboard navigation while lightbox is open.
+  useEffect(() => {
+    if (lightboxIdx === null) return
+    const onKey = (e: KeyboardEvent) => {
+      const photos = data && data !== 'missing' ? data.photos : []
+      if (e.key === 'Escape') setLightboxIdx(null)
+      else if (e.key === 'ArrowRight' && photos.length > 0) {
+        setLightboxIdx(i => (i === null ? null : (i + 1) % photos.length))
+      } else if (e.key === 'ArrowLeft' && photos.length > 0) {
+        setLightboxIdx(i => (i === null ? null : (i - 1 + photos.length) % photos.length))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [lightboxIdx, data])
 
   async function toggleSave() {
     if (saved) {
@@ -450,7 +510,13 @@ function DetailView({ id, onBack, onEdit }: { id: string; onBack: () => void; on
       <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--card-gradient)] shadow-[var(--shadow-card)]">
         <div className="relative aspect-[16/10] w-full bg-[var(--paper-deep)]">
           {cover ? (
-            <img src={cover} alt={l.title} className="h-full w-full object-cover" />
+            <button
+              onClick={() => setLightboxIdx(photoIdx)}
+              className="block h-full w-full"
+              aria-label="Open full-size photo"
+            >
+              <img src={cover} alt={l.title} className="h-full w-full object-cover" />
+            </button>
           ) : (
             <div className="flex h-full w-full items-center justify-center text-xs text-[var(--muted)]">No photo</div>
           )}
@@ -538,6 +604,82 @@ function DetailView({ id, onBack, onEdit }: { id: string; onBack: () => void; on
           </aside>
         </div>
       </div>
+
+      {similar.length > 0 && (
+        <section className="mt-10">
+          <h2 className="display-font mb-4 text-lg font-bold">You might also like</h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {similar.map(s => (
+              <ListingCard key={s.id} listing={s} onClick={() => onOpen(s.id)} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {lightboxIdx !== null && l.photos[lightboxIdx] && (
+        <Lightbox
+          photos={l.photos}
+          index={lightboxIdx}
+          title={l.title}
+          onClose={() => setLightboxIdx(null)}
+          onChange={i => { setLightboxIdx(i); setPhotoIdx(i) }}
+        />
+      )}
+    </div>
+  )
+}
+
+function Lightbox({ photos, index, title, onClose, onChange }: {
+  photos: ListingPhoto[]
+  index: number
+  title: string
+  onClose: () => void
+  onChange: (i: number) => void
+}) {
+  const photo = photos[index]
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <button
+        onClick={e => { e.stopPropagation(); onClose() }}
+        className="absolute right-4 top-4 rounded-full bg-white/10 px-3 py-1.5 text-sm font-semibold text-white hover:bg-white/20"
+        aria-label="Close"
+      >
+        ✕
+      </button>
+      {photos.length > 1 && (
+        <>
+          <button
+            onClick={e => { e.stopPropagation(); onChange((index - 1 + photos.length) % photos.length) }}
+            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-4 py-3 text-lg font-semibold text-white hover:bg-white/20"
+            aria-label="Previous photo"
+          >
+            ‹
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onChange((index + 1) % photos.length) }}
+            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-4 py-3 text-lg font-semibold text-white hover:bg-white/20"
+            aria-label="Next photo"
+          >
+            ›
+          </button>
+        </>
+      )}
+      <img
+        src={photo.url}
+        alt={title}
+        onClick={e => e.stopPropagation()}
+        className="max-h-[92vh] max-w-[92vw] object-contain"
+      />
+      {photos.length > 1 && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
+          {index + 1} / {photos.length}
+        </div>
+      )}
     </div>
   )
 }
