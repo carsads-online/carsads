@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { initPro } from '@proappstore/sdk'
 import { ProShell } from '@proappstore/sdk/shell'
-import { useProSubscription } from '@proappstore/sdk/hooks'
 import type {
   Listing,
   ListingPhoto,
@@ -115,7 +114,7 @@ const COMMON_MAKES = [
 
 export default function App() {
   return (
-    <ProShell app={app} appName="Carsads" allowFree={true}>
+    <ProShell app={app} appName="Carsads">
       <CarsadsApp />
     </ProShell>
   )
@@ -172,14 +171,10 @@ function CarsadsApp() {
         />
       )}
       {view.kind === 'post' && (
-        <ProGate>
-          <PostView mode="create" onDone={id => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'browse' })} />
-        </ProGate>
+        <PostView mode="create" onDone={id => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'browse' })} />
       )}
       {view.kind === 'edit' && (
-        <ProGate>
-          <PostView mode="edit" listingId={view.id} onDone={id => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'detail', id: view.id })} />
-        </ProGate>
+        <PostView mode="edit" listingId={view.id} onDone={id => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'detail', id: view.id })} />
       )}
       {view.kind === 'mine' && (
         <MyListingsView onOpen={id => setView({ kind: 'detail', id })} onPost={() => setView({ kind: 'post' })} />
@@ -199,28 +194,6 @@ function CarsadsApp() {
           onOpenListing={() => setView({ kind: 'detail', id: view.listingId })}
         />
       )}
-    </div>
-  )
-}
-
-// ─── Pro gate (post requires subscription) ─────────────────────────────────
-
-function ProGate({ children }: { children: React.ReactNode }) {
-  const { isPro, loading, upgrade } = useProSubscription(app)
-  if (loading) return <CenterMessage text="Checking subscription…" />
-  if (isPro) return <>{children}</>
-  return (
-    <div className="mx-auto max-w-md py-16 text-center">
-      <p className="display-font text-2xl font-bold">Pro required to post</p>
-      <p className="mt-2 text-sm text-[var(--muted)]">
-        Posting a listing needs an active ProAppStore subscription. Browsing and saving are free.
-      </p>
-      <button
-        onClick={() => upgrade()}
-        className="mt-6 rounded-2xl bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[var(--accent-deep)]"
-      >
-        Upgrade to Pro
-      </button>
     </div>
   )
 }
