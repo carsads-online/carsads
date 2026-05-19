@@ -113,3 +113,8 @@ export const BODY_TYPES = [
   'Van',
   'Truck',
 ] as const
+
+export const COMMON_MAKES = [
+  'Toyota', 'Honda', 'Ford', 'BMW', 'Mercedes-Benz', 'Volkswagen',
+  'Mazda', 'Hyundai', 'Kia', 'Subaru', 'Nissan', 'Audi', 'Tesla', 'Other',
+] as const
