@@ -17,6 +17,4 @@ FAS_API_BASE = "https://api.freeappstore.online"
 [[d1_databases]]
 binding = "DB"
 database_name = "carsads"
-# Provisioned via `pas create` or POST https://api.proappstore.online/v1/provision.
-# Fill in the database_id returned by provisioning before deploying the data worker.
-database_id = "PROVISION_ME"
+database_id = "65df8d89-7d92-4154-8a31-d63053673265"
