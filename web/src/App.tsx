@@ -6,6 +6,8 @@ import type {
   Listing,
   ListingPhoto,
   ListingWithPhotos,
+  Message,
+  ThreadSummary,
   View,
   Filters,
 } from './types.ts'
@@ -83,6 +85,23 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_photos_listing ON listing_photos(listing_id)
     `,
   },
+  {
+    name: '0002_messages',
+    sql: `
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        listing_id TEXT NOT NULL,
+        buyer_id TEXT NOT NULL,
+        buyer_login TEXT,
+        sender_id TEXT NOT NULL,
+        sender_login TEXT,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(listing_id, buyer_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_buyer ON messages(buyer_id, created_at)
+    `,
+  },
 ]
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -145,6 +164,11 @@ function CarsadsApp() {
           onBack={() => setView({ kind: 'browse' })}
           onEdit={id => setView({ kind: 'edit', id })}
           onOpen={id => setView({ kind: 'detail', id })}
+          onMessage={listingId => {
+            const buyerId = app.auth.user?.id
+            if (!buyerId) return
+            setView({ kind: 'chat', listingId, buyerId })
+          }}
         />
       )}
       {view.kind === 'post' && (
@@ -161,6 +185,20 @@ function CarsadsApp() {
         <MyListingsView onOpen={id => setView({ kind: 'detail', id })} onPost={() => setView({ kind: 'post' })} />
       )}
       {view.kind === 'saved' && <SavedView onOpen={id => setView({ kind: 'detail', id })} />}
+      {view.kind === 'inbox' && (
+        <InboxView
+          onOpenThread={(listingId, buyerId) => setView({ kind: 'chat', listingId, buyerId })}
+          onOpenListing={id => setView({ kind: 'detail', id })}
+        />
+      )}
+      {view.kind === 'chat' && (
+        <ChatView
+          listingId={view.listingId}
+          buyerId={view.buyerId}
+          onBack={() => setView({ kind: 'inbox' })}
+          onOpenListing={() => setView({ kind: 'detail', id: view.listingId })}
+        />
+      )}
     </div>
   )
 }
@@ -211,6 +249,7 @@ function TopNav({ view, setView }: { view: View; setView: (v: View) => void }) {
       </button>
       <Tab active={view.kind === 'browse'} label="Browse" onClick={() => setView({ kind: 'browse' })} />
       <Tab active={view.kind === 'saved'} label="Saved" onClick={() => setView({ kind: 'saved' })} />
+      <Tab active={view.kind === 'inbox' || view.kind === 'chat'} label="Inbox" onClick={() => setView({ kind: 'inbox' })} />
       <Tab active={view.kind === 'mine'} label="My listings" onClick={() => setView({ kind: 'mine' })} />
       <button
         onClick={() => setView({ kind: 'post' })}
@@ -227,6 +266,7 @@ function TopNav({ view, setView }: { view: View; setView: (v: View) => void }) {
 function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [items, setItems] = useState<ListingWithPhotos[] | null>(null)
+  const [recent, setRecent] = useState<ListingWithPhotos[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -246,6 +286,33 @@ function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
         byId.get(p.listing_id)!.push(p)
       }
       if (!cancelled) setItems(rows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Recently viewed (KV).
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const stored = (await app.kv.get<{ id: string; ts: number }[]>('recent').catch(() => null)) ?? []
+      const ids = stored.slice(0, 5).map(r => r.id)
+      if (ids.length === 0) return
+      const rows = await dbQuery<Listing>(
+        `SELECT * FROM listings WHERE id IN (${ids.map(() => '?').join(',')})`,
+        ids,
+      )
+      // Preserve KV order
+      const rowMap = new Map(rows.map(r => [r.id, r]))
+      const ordered = ids.map(id => rowMap.get(id)).filter((r): r is Listing => !!r)
+      const ph = ordered.length
+        ? await dbQuery<ListingPhoto>(
+            `SELECT * FROM listing_photos WHERE listing_id IN (${ordered.map(() => '?').join(',')}) AND position = 0`,
+            ordered.map(r => r.id),
+          )
+        : []
+      const coverById = new Map<string, ListingPhoto[]>()
+      for (const p of ph) coverById.set(p.listing_id, [p])
+      if (!cancelled) setRecent(ordered.map(r => ({ ...r, photos: coverById.get(r.id) ?? [] })))
     })()
     return () => { cancelled = true }
   }, [])
@@ -282,6 +349,32 @@ function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
 
   return (
     <div>
+      {recent.length > 0 && (
+        <section className="mb-6">
+          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">Recently viewed</h2>
+          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2">
+            {recent.map(r => (
+              <button
+                key={r.id}
+                onClick={() => onOpen(r.id)}
+                className="flex w-40 flex-none flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--card-gradient)] text-left shadow-[var(--shadow-card)] hover:border-[var(--line-strong)]"
+              >
+                <div className="aspect-[4/3] w-full bg-[var(--paper-deep)]">
+                  {r.photos[0]?.url ? (
+                    <img src={r.photos[0].url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[10px] text-[var(--muted)]">No photo</div>
+                  )}
+                </div>
+                <div className="p-2">
+                  <p className="display-font line-clamp-1 text-xs font-semibold">{r.title}</p>
+                  <p className="mt-0.5 text-[10px] text-[var(--accent-deep)]">{formatPrice(r.price_cents)}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <FilterBar filters={filters} setFilters={setFilters} />
       {items && hasActiveFilters && (
         <div className="mb-4 flex items-center justify-between text-xs text-[var(--muted)]">
@@ -415,7 +508,7 @@ function ListingCard({ listing, onClick }: { listing: ListingWithPhotos; onClick
 
 // ─── Detail ─────────────────────────────────────────────────────────────────
 
-function DetailView({ id, onBack, onEdit, onOpen }: { id: string; onBack: () => void; onEdit: (id: string) => void; onOpen: (id: string) => void }) {
+function DetailView({ id, onBack, onEdit, onOpen, onMessage }: { id: string; onBack: () => void; onEdit: (id: string) => void; onOpen: (id: string) => void; onMessage: (listingId: string) => void }) {
   const [data, setData] = useState<ListingWithPhotos | null | 'missing'>(null)
   const [me, setMe] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -439,6 +532,15 @@ function DetailView({ id, onBack, onEdit, onOpen }: { id: string; onBack: () => 
       setSaved(!!fav)
       setPhotoIdx(0)
       setLightboxIdx(null)
+
+      // Record in recently-viewed (KV-backed, deduped, last 10).
+      try {
+        const prev = (await app.kv.get<{ id: string; ts: number }[]>('recent')) ?? []
+        const next = [{ id, ts: Date.now() }, ...prev.filter(r => r.id !== id)].slice(0, 10)
+        await app.kv.set('recent', next)
+      } catch {
+        // non-fatal — recently-viewed is a soft feature
+      }
 
       // Fetch similar listings: same make OR same body_type, exclude self.
       const similarRows = await dbQuery<Listing>(
@@ -580,15 +682,23 @@ function DetailView({ id, onBack, onEdit, onOpen }: { id: string; onBack: () => 
               >
                 Edit listing
               </button>
-            ) : l.contact_email ? (
-              <a
-                href={`mailto:${l.contact_email}?subject=${encodeURIComponent('Re: ' + l.title)}`}
-                className="block w-full rounded-2xl bg-[var(--accent)] px-4 py-3 text-center text-sm font-semibold text-white hover:bg-[var(--accent-deep)]"
-              >
-                Contact seller
-              </a>
             ) : (
-              <p className="text-xs text-[var(--muted)]">Seller hasn't shared contact details.</p>
+              <>
+                <button
+                  onClick={() => onMessage(l.id)}
+                  className="w-full rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white hover:bg-[var(--accent-deep)]"
+                >
+                  Message seller
+                </button>
+                {l.contact_email && (
+                  <a
+                    href={`mailto:${l.contact_email}?subject=${encodeURIComponent('Re: ' + l.title)}`}
+                    className="block w-full rounded-2xl border border-[var(--line)] bg-[var(--glass)] px-4 py-3 text-center text-sm font-semibold hover:bg-[var(--glass-hover)]"
+                  >
+                    Or email
+                  </a>
+                )}
+              </>
             )}
             <button
               onClick={toggleSave}
@@ -1251,6 +1361,294 @@ function SavedView({ onOpen }: { onOpen: (id: string) => void }) {
       {items.map(l => (
         <ListingCard key={l.id} listing={l} onClick={() => onOpen(l.id)} />
       ))}
+    </div>
+  )
+}
+
+// ─── Inbox ──────────────────────────────────────────────────────────────────
+
+function InboxView({ onOpenThread, onOpenListing }: {
+  onOpenThread: (listingId: string, buyerId: string) => void
+  onOpenListing: (id: string) => void
+}) {
+  const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const me = app.auth.user?.id
+      if (!me) { setThreads([]); return }
+      const rows = await dbQuery<ThreadSummary>(
+        `SELECT
+           m.listing_id, m.buyer_id, m.buyer_login,
+           l.title AS listing_title,
+           l.seller_id, l.seller_login,
+           (SELECT content FROM messages WHERE listing_id = m.listing_id AND buyer_id = m.buyer_id ORDER BY created_at DESC LIMIT 1) AS latest_content,
+           (SELECT MAX(created_at) FROM messages WHERE listing_id = m.listing_id AND buyer_id = m.buyer_id) AS latest_at,
+           (SELECT COUNT(*) FROM messages WHERE listing_id = m.listing_id AND buyer_id = m.buyer_id) AS message_count,
+           '' AS listing_cover
+         FROM messages m
+         JOIN listings l ON l.id = m.listing_id
+         WHERE m.buyer_id = ?1 OR l.seller_id = ?1
+         GROUP BY m.listing_id, m.buyer_id
+         ORDER BY latest_at DESC`,
+        [me],
+      )
+      if (cancelled) return
+      // Fetch cover photo (position=0) for each unique listing
+      const listingIds = Array.from(new Set(rows.map(r => r.listing_id)))
+      let covers = new Map<string, string>()
+      if (listingIds.length > 0) {
+        const ph = await dbQuery<{ listing_id: string; url: string }>(
+          `SELECT listing_id, url FROM listing_photos
+           WHERE listing_id IN (${listingIds.map(() => '?').join(',')}) AND position = 0`,
+          listingIds,
+        )
+        for (const p of ph) covers.set(p.listing_id, p.url)
+      }
+      if (!cancelled) setThreads(rows.map(r => ({ ...r, listing_cover: covers.get(r.listing_id) ?? null })))
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  if (!threads) return <CenterMessage text="Loading inbox…" />
+  if (threads.length === 0) {
+    return <EmptyState title="No conversations yet" hint="Message a seller from a listing detail page — or wait for buyers to reach out." />
+  }
+  const me = app.auth.user?.id
+  return (
+    <div className="space-y-2">
+      {threads.map(t => {
+        const iAmSeller = me === t.seller_id
+        const counterparty = iAmSeller ? (t.buyer_login ?? 'Anonymous buyer') : (t.seller_login ?? 'Seller')
+        return (
+          <button
+            key={t.listing_id + ':' + t.buyer_id}
+            onClick={() => onOpenThread(t.listing_id, t.buyer_id)}
+            className="flex w-full items-center gap-4 rounded-2xl border border-[var(--line)] bg-[var(--card-gradient)] p-4 text-left shadow-[var(--shadow-card)] hover:border-[var(--line-strong)]"
+          >
+            <div className="h-14 w-14 flex-none overflow-hidden rounded-lg bg-[var(--paper-deep)]">
+              {t.listing_cover ? (
+                <img src={t.listing_cover} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[10px] text-[var(--muted)]">No photo</div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="display-font truncate text-base font-semibold">{t.listing_title}</span>
+                <span className="flex-none text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                  {relativeDate(t.latest_at)}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-[var(--muted)]">
+                {iAmSeller ? 'From ' : 'With '}@{counterparty} · {t.message_count} message{t.message_count === 1 ? '' : 's'}
+              </p>
+              <p className="mt-1 truncate text-sm">{t.latest_content}</p>
+            </div>
+            <button
+              onClick={e => { e.stopPropagation(); onOpenListing(t.listing_id) }}
+              className="flex-none rounded-full border border-[var(--line)] bg-[var(--glass)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--glass-hover)]"
+              aria-label="View listing"
+            >
+              View
+            </button>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Chat ───────────────────────────────────────────────────────────────────
+
+function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
+  listingId: string
+  buyerId: string
+  onBack: () => void
+  onOpenListing: () => void
+}) {
+  const [listing, setListing] = useState<Listing | null | 'missing'>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [content, setContent] = useState('')
+  const [sending, setSending] = useState(false)
+  const me = app.auth.user
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Load listing once.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const rows = await dbQuery<Listing>(`SELECT * FROM listings WHERE id = ? LIMIT 1`, [listingId])
+      if (!cancelled) setListing(rows[0] ?? 'missing')
+    })()
+    return () => { cancelled = true }
+  }, [listingId])
+
+  // Poll messages every 4 seconds.
+  useEffect(() => {
+    let cancelled = false
+    async function refresh() {
+      const rows = await dbQuery<Message>(
+        `SELECT * FROM messages WHERE listing_id = ? AND buyer_id = ? ORDER BY created_at ASC`,
+        [listingId, buyerId],
+      )
+      if (!cancelled) setMessages(rows)
+    }
+    refresh()
+    const interval = setInterval(refresh, 4000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [listingId, buyerId])
+
+  // Auto-scroll to bottom on new messages.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+  }, [messages.length])
+
+  async function send() {
+    const trimmed = content.trim()
+    if (!trimmed || !me) return
+    setSending(true)
+    try {
+      const msg: Message = {
+        id: genId(),
+        listing_id: listingId,
+        buyer_id: buyerId,
+        buyer_login: listing && listing !== 'missing' && listing.seller_id === me.id
+          ? null // seller-sent message keeps the buyer_login as recorded on first message
+          : me.login ?? null,
+        sender_id: me.id,
+        sender_login: me.login ?? null,
+        content: trimmed,
+        created_at: Date.now(),
+      }
+      await dbExec(
+        `INSERT INTO messages (id, listing_id, buyer_id, buyer_login, sender_id, sender_login, content, created_at)
+         VALUES (?, ?, ?, COALESCE(?, (SELECT buyer_login FROM messages WHERE listing_id = ? AND buyer_id = ? LIMIT 1)), ?, ?, ?, ?)`,
+        [msg.id, msg.listing_id, msg.buyer_id, msg.buyer_login, msg.listing_id, msg.buyer_id, msg.sender_id, msg.sender_login, msg.content, msg.created_at],
+      )
+      setMessages(m => [...m, msg])
+      setContent('')
+    } catch (e) {
+      console.error('Send failed', e)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (listing === null) return <CenterMessage text="Loading chat…" />
+  if (listing === 'missing') {
+    return (
+      <div>
+        <BackButton onClick={onBack} />
+        <EmptyState title="Listing not found" hint="It may have been removed." />
+      </div>
+    )
+  }
+
+  const iAmSeller = me?.id === listing.seller_id
+  const iAmBuyer = me?.id === buyerId
+  const allowed = iAmSeller || iAmBuyer
+  if (!allowed) {
+    return (
+      <div>
+        <BackButton onClick={onBack} />
+        <EmptyState title="Conversation not available" hint="You're not part of this thread." />
+      </div>
+    )
+  }
+  if (iAmSeller && buyerId === me?.id) {
+    return (
+      <div>
+        <BackButton onClick={onBack} />
+        <EmptyState title="That's your own listing" hint="You can't message yourself. Edit the listing instead." />
+      </div>
+    )
+  }
+  const counterpartyLogin = iAmSeller
+    ? (messages.find(m => m.sender_id === buyerId)?.sender_login ?? messages.find(m => m.buyer_login)?.buyer_login ?? 'buyer')
+    : (listing.seller_login ?? 'seller')
+
+  return (
+    <div className="mx-auto max-w-2xl">
+      <BackButton onClick={onBack} />
+      <button
+        onClick={onOpenListing}
+        className="mb-4 flex w-full items-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--card-gradient)] p-3 text-left shadow-[var(--shadow-card)] hover:border-[var(--line-strong)]"
+      >
+        <div>
+          <p className="display-font text-base font-semibold">{listing.title}</p>
+          <p className="text-xs text-[var(--muted)]">
+            {formatPrice(listing.price_cents)} · with @{counterpartyLogin} · {iAmSeller ? 'buyer thread' : 'seller thread'}
+          </p>
+        </div>
+      </button>
+
+      <div
+        ref={scrollRef}
+        className="mb-3 h-[55vh] overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--glass)] p-4"
+      >
+        {messages.length === 0 ? (
+          <p className="py-12 text-center text-sm text-[var(--muted)]">
+            No messages yet. Say hi.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {messages.map(m => {
+              const mine = m.sender_id === me?.id
+              return (
+                <div key={m.id} className={'flex ' + (mine ? 'justify-end' : 'justify-start')}>
+                  <div
+                    className={
+                      'max-w-[80%] rounded-2xl px-3 py-2 text-sm ' +
+                      (mine
+                        ? 'bg-[var(--accent)] text-white'
+                        : 'border border-[var(--line)] bg-[var(--paper-deep)]')
+                    }
+                  >
+                    {!mine && (
+                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                        @{m.sender_login ?? 'user'}
+                      </p>
+                    )}
+                    <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                    <p className={'mt-1 text-[10px] ' + (mine ? 'text-white/70' : 'text-[var(--muted)]')}>
+                      {relativeDate(m.created_at)}
+                    </p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <form
+        onSubmit={e => { e.preventDefault(); void send() }}
+        className="flex items-end gap-2"
+      >
+        <textarea
+          value={content}
+          onChange={e => setContent(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              void send()
+            }
+          }}
+          maxLength={2000}
+          placeholder={iAmSeller ? 'Reply to buyer…' : 'Message the seller…'}
+          rows={2}
+          className="flex-1 resize-none rounded-2xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
+        />
+        <button
+          type="submit"
+          disabled={sending || !content.trim()}
+          className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white hover:bg-[var(--accent-deep)] disabled:opacity-50"
+        >
+          Send
+        </button>
+      </form>
     </div>
   )
 }

@@ -32,6 +32,30 @@ export interface ListingWithPhotos extends Listing {
   photos: ListingPhoto[]
 }
 
+export interface Message {
+  id: string
+  listing_id: string
+  buyer_id: string
+  buyer_login: string | null
+  sender_id: string
+  sender_login: string | null
+  content: string
+  created_at: number
+}
+
+export interface ThreadSummary {
+  listing_id: string
+  listing_title: string
+  listing_cover: string | null
+  seller_id: string
+  seller_login: string | null
+  buyer_id: string
+  buyer_login: string | null
+  latest_content: string
+  latest_at: number
+  message_count: number
+}
+
 export type View =
   | { kind: 'browse' }
   | { kind: 'detail'; id: string }
@@ -39,6 +63,8 @@ export type View =
   | { kind: 'edit'; id: string }
   | { kind: 'mine' }
   | { kind: 'saved' }
+  | { kind: 'inbox' }
+  | { kind: 'chat'; listingId: string; buyerId: string }
 
 export type Sort = 'newest' | 'price-asc' | 'price-desc' | 'year-desc' | 'mileage-asc'
 
