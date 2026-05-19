@@ -200,7 +200,13 @@ function TopNav({ view, setView }: { view: View; setView: (v: View) => void }) {
     </button>
   )
   return (
-    <nav className="mb-6 flex flex-wrap items-center justify-end gap-1 pt-2">
+    <nav className="mb-6 flex flex-wrap items-center gap-1 pt-2">
+      <button
+        onClick={() => setView({ kind: 'browse' })}
+        className="display-font mr-auto text-lg font-bold tracking-tight"
+      >
+        carsads
+      </button>
       <Tab active={view.kind === 'browse'} label="Browse" onClick={() => setView({ kind: 'browse' })} />
       <Tab active={view.kind === 'saved'} label="Saved" onClick={() => setView({ kind: 'saved' })} />
       <Tab active={view.kind === 'mine'} label="My listings" onClick={() => setView({ kind: 'mine' })} />
@@ -259,15 +265,38 @@ function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
     })
   }, [items, filters])
 
+  const hasActiveFilters = filters.q !== '' || filters.make !== '' || filters.minPrice !== '' || filters.maxPrice !== '' || filters.minYear !== '' || filters.maxYear !== ''
+
   return (
     <div>
       <FilterBar filters={filters} setFilters={setFilters} />
+      {items && hasActiveFilters && (
+        <div className="mb-4 flex items-center justify-between text-xs text-[var(--muted)]">
+          <span>
+            Showing {filtered?.length ?? 0} of {items.length}
+          </span>
+          <button
+            onClick={() => setFilters(EMPTY_FILTERS)}
+            className="font-semibold underline-offset-2 hover:text-[var(--ink)] hover:underline"
+          >
+            Clear filters
+          </button>
+        </div>
+      )}
       {!items ? (
         <CenterMessage text="Loading listings…" />
       ) : filtered && filtered.length === 0 ? (
         <EmptyState
           title={items.length === 0 ? 'No listings yet' : 'No matches'}
           hint={items.length === 0 ? 'Be the first to post one.' : 'Try clearing some filters.'}
+          action={hasActiveFilters ? (
+            <button
+              onClick={() => setFilters(EMPTY_FILTERS)}
+              className="rounded-2xl border border-[var(--line)] bg-[var(--glass)] px-4 py-2 text-sm font-semibold hover:bg-[var(--glass-hover)]"
+            >
+              Clear filters
+            </button>
+          ) : undefined}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -590,6 +619,7 @@ function PostView({
   const [photos, setPhotos] = useState<string[]>([])
   const [loaded, setLoaded] = useState(mode === 'create')
   const [submitting, setSubmitting] = useState(false)
+  const [uploading, setUploading] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const idRef = useRef<string>(listingId ?? genId())
 
@@ -633,19 +663,27 @@ function PostView({
   async function handleUpload(files: FileList | null) {
     if (!files) return
     const uploads = Array.from(files).slice(0, 8 - photos.length)
-    for (const file of uploads) {
-      try {
-        const path = imagePathFor(idRef.current, file.name)
-        await app.storage.uploadPublic(path, file, file.type)
-        setPhotos(p => [...p, app.storage.publicUrl(path)])
-      } catch (e) {
-        setError('Upload failed: ' + (e as Error).message)
+    setUploading(u => u + uploads.length)
+    try {
+      for (const file of uploads) {
+        try {
+          const path = imagePathFor(idRef.current, file.name)
+          const result = await app.storage.uploadPublic(path, file, file.type)
+          setPhotos(p => [...p, result.url])
+        } catch (e) {
+          setError('Upload failed: ' + (e as Error).message)
+        } finally {
+          setUploading(u => u - 1)
+        }
       }
+    } catch {
+      // setUploading already balanced in finally
     }
   }
 
   async function handleGeocode() {
     if (!form.location.trim()) return
+    if (form.lat !== null && form.lng !== null) return // already pinned for this location
     try {
       const results = await app.maps.geocode(form.location, 1)
       if (results[0]) update({ lat: results[0].lat, lng: results[0].lng })
@@ -674,43 +712,45 @@ function PostView({
       const id = idRef.current
       const now = Date.now()
 
-      if (mode === 'create') {
-        await dbExec(
-          `INSERT INTO listings (id, title, make, model, year, price_cents, mileage_km,
-            fuel_type, transmission, body_type, color, description, location, lat, lng,
-            contact_email, status, seller_id, seller_login, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
-          [
-            id, form.title.trim(), form.make.trim(), form.model.trim(), year, priceCents, mileage,
-            form.fuel_type || null, form.transmission || null, form.body_type || null,
-            form.color || null, form.description || null, form.location.trim(),
-            form.lat, form.lng, form.contact_email || null,
-            user.id, user.login ?? null, now,
-          ],
-        )
-      } else {
-        await dbExec(
-          `UPDATE listings SET title=?, make=?, model=?, year=?, price_cents=?, mileage_km=?,
-             fuel_type=?, transmission=?, body_type=?, color=?, description=?, location=?,
-             lat=?, lng=?, contact_email=?
-           WHERE id = ? AND seller_id = ?`,
-          [
-            form.title.trim(), form.make.trim(), form.model.trim(), year, priceCents, mileage,
-            form.fuel_type || null, form.transmission || null, form.body_type || null,
-            form.color || null, form.description || null, form.location.trim(),
-            form.lat, form.lng, form.contact_email || null,
-            id, user.id,
-          ],
-        )
-        await dbExec(`DELETE FROM listing_photos WHERE listing_id = ?`, [id])
-      }
+      const listingStmt = mode === 'create'
+        ? {
+            sql: `INSERT INTO listings (id, title, make, model, year, price_cents, mileage_km,
+                    fuel_type, transmission, body_type, color, description, location, lat, lng,
+                    contact_email, status, seller_id, seller_login, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+            params: [
+              id, form.title.trim(), form.make.trim(), form.model.trim(), year, priceCents, mileage,
+              form.fuel_type || null, form.transmission || null, form.body_type || null,
+              form.color || null, form.description || null, form.location.trim(),
+              form.lat, form.lng, form.contact_email || null,
+              user.id, user.login ?? null, now,
+            ],
+          }
+        : {
+            sql: `UPDATE listings SET title=?, make=?, model=?, year=?, price_cents=?, mileage_km=?,
+                    fuel_type=?, transmission=?, body_type=?, color=?, description=?, location=?,
+                    lat=?, lng=?, contact_email=?
+                  WHERE id = ? AND seller_id = ?`,
+            params: [
+              form.title.trim(), form.make.trim(), form.model.trim(), year, priceCents, mileage,
+              form.fuel_type || null, form.transmission || null, form.body_type || null,
+              form.color || null, form.description || null, form.location.trim(),
+              form.lat, form.lng, form.contact_email || null,
+              id, user.id,
+            ],
+          }
 
-      for (let i = 0; i < photos.length; i++) {
-        await dbExec(
-          `INSERT INTO listing_photos (id, listing_id, url, position) VALUES (?, ?, ?, ?)`,
-          [genId(), id, photos[i], i],
-        )
-      }
+      const photoStmts = [
+        ...(mode === 'edit'
+          ? [{ sql: `DELETE FROM listing_photos WHERE listing_id = ?`, params: [id] }]
+          : []),
+        ...photos.map((url, i) => ({
+          sql: `INSERT INTO listing_photos (id, listing_id, url, position) VALUES (?, ?, ?, ?)`,
+          params: [genId(), id, url, i],
+        })),
+      ]
+
+      await app.db.batch([listingStmt, ...photoStmts])
       onDone(id)
     } catch (e) {
       setError((e as Error).message)
@@ -877,7 +917,7 @@ function PostView({
           />
         </Field>
 
-        <Field label={`Photos (${photos.length}/8)`}>
+        <Field label={`Photos (${photos.length}/8)${uploading > 0 ? ` — uploading ${uploading}…` : ''}`}>
           <div className="grid grid-cols-4 gap-2">
             {photos.map((url, i) => (
               <div key={url} className="relative aspect-square overflow-hidden rounded-lg border border-[var(--line)]">
@@ -892,14 +932,19 @@ function PostView({
                 </button>
               </div>
             ))}
-            {photos.length < 8 && (
+            {Array.from({ length: uploading }).map((_, i) => (
+              <div key={`pending-${i}`} className="flex aspect-square items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--glass)] text-xs text-[var(--muted)]">
+                Uploading…
+              </div>
+            ))}
+            {photos.length + uploading < 8 && (
               <label className="flex aspect-square cursor-pointer items-center justify-center rounded-lg border border-dashed border-[var(--line-strong)] bg-[var(--glass)] text-xs text-[var(--muted)] hover:bg-[var(--glass-hover)]">
                 + Add
                 <input
                   type="file"
                   accept="image/*"
                   multiple
-                  onChange={e => handleUpload(e.target.files)}
+                  onChange={e => { handleUpload(e.target.files); e.target.value = '' }}
                   className="hidden"
                 />
               </label>
@@ -973,8 +1018,10 @@ function MyListingsView({ onOpen, onPost }: { onOpen: (id: string) => void; onPo
   async function remove(id: string) {
     if (!confirm('Delete this listing? This cannot be undone.')) return
     setBusy(id)
-    await dbExec(`DELETE FROM listing_photos WHERE listing_id = ?`, [id])
-    await dbExec(`DELETE FROM listings WHERE id = ?`, [id])
+    await app.db.batch([
+      { sql: `DELETE FROM listing_photos WHERE listing_id = ?`, params: [id] },
+      { sql: `DELETE FROM listings WHERE id = ?`, params: [id] },
+    ])
     await reload()
     setBusy(null)
   }
