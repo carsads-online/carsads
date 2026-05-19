@@ -267,7 +267,12 @@ function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const stored = (await app.kv.get<{ id: string; ts: number }[]>('recent').catch(() => null)) ?? []
+      const raw = await app.kv.get<unknown>('recent').catch(() => null)
+      const stored: { id: string; ts: number }[] = Array.isArray(raw)
+        ? raw.filter((r): r is { id: string; ts: number } =>
+            !!r && typeof r === 'object' && typeof (r as { id?: unknown }).id === 'string',
+          )
+        : []
       const ids = stored.slice(0, 5).map(r => r.id)
       if (ids.length === 0) return
       const rows = await dbQuery<Listing>(
@@ -491,6 +496,11 @@ function DetailView({ id, onBack, onEdit, onOpen, onMessage }: { id: string; onB
 
   useEffect(() => {
     let cancelled = false
+    // Reset per-listing state so the previous listing's data doesn't flash through.
+    setData(null)
+    setSimilar([])
+    setPhotoIdx(0)
+    setLightboxIdx(null)
     ;(async () => {
       const [rows, photos, fav] = await Promise.all([
         dbQuery<Listing>(`SELECT * FROM listings WHERE id = ? LIMIT 1`, [id]),
@@ -503,12 +513,15 @@ function DetailView({ id, onBack, onEdit, onOpen, onMessage }: { id: string; onB
       setData({ ...l, photos })
       setMe(app.auth.user?.id ?? null)
       setSaved(!!fav)
-      setPhotoIdx(0)
-      setLightboxIdx(null)
 
       // Record in recently-viewed (KV-backed, deduped, last 10).
       try {
-        const prev = (await app.kv.get<{ id: string; ts: number }[]>('recent')) ?? []
+        const raw = await app.kv.get<unknown>('recent')
+        const prev: { id: string; ts: number }[] = Array.isArray(raw)
+          ? raw.filter((r): r is { id: string; ts: number } =>
+              !!r && typeof r === 'object' && typeof (r as { id?: unknown }).id === 'string',
+            )
+          : []
         const next = [{ id, ts: Date.now() }, ...prev.filter(r => r.id !== id)].slice(0, 10)
         await app.kv.set('recent', next)
       } catch {
@@ -1353,12 +1366,13 @@ function InboxView({ onOpenThread, onOpenListing }: {
       if (!me) { setThreads([]); return }
       const rows = await dbQuery<ThreadSummary>(
         `SELECT
-           m.listing_id, m.buyer_id, m.buyer_login,
+           m.listing_id, m.buyer_id,
+           (SELECT buyer_login FROM messages WHERE listing_id = m.listing_id AND buyer_id = m.buyer_id AND buyer_login IS NOT NULL LIMIT 1) AS buyer_login,
            l.title AS listing_title,
            l.seller_id, l.seller_login,
            (SELECT content FROM messages WHERE listing_id = m.listing_id AND buyer_id = m.buyer_id ORDER BY created_at DESC LIMIT 1) AS latest_content,
-           (SELECT MAX(created_at) FROM messages WHERE listing_id = m.listing_id AND buyer_id = m.buyer_id) AS latest_at,
-           (SELECT COUNT(*) FROM messages WHERE listing_id = m.listing_id AND buyer_id = m.buyer_id) AS message_count,
+           MAX(m.created_at) AS latest_at,
+           COUNT(*) AS message_count,
            '' AS listing_cover
          FROM messages m
          JOIN listings l ON l.id = m.listing_id
@@ -1395,38 +1409,42 @@ function InboxView({ onOpenThread, onOpenListing }: {
         const iAmSeller = me === t.seller_id
         const counterparty = iAmSeller ? (t.buyer_login ?? 'Anonymous buyer') : (t.seller_login ?? 'Seller')
         return (
-          <button
+          <div
             key={t.listing_id + ':' + t.buyer_id}
-            onClick={() => onOpenThread(t.listing_id, t.buyer_id)}
-            className="flex w-full items-center gap-4 rounded-2xl border border-[var(--line)] bg-[var(--card-gradient)] p-4 text-left shadow-[var(--shadow-card)] hover:border-[var(--line-strong)]"
+            className="flex w-full items-center gap-4 rounded-2xl border border-[var(--line)] bg-[var(--card-gradient)] p-4 shadow-[var(--shadow-card)] hover:border-[var(--line-strong)]"
           >
-            <div className="h-14 w-14 flex-none overflow-hidden rounded-lg bg-[var(--paper-deep)]">
-              {t.listing_cover ? (
-                <img src={t.listing_cover} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-[10px] text-[var(--muted)]">No photo</div>
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="display-font truncate text-base font-semibold">{t.listing_title}</span>
-                <span className="flex-none text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                  {relativeDate(t.latest_at)}
-                </span>
-              </div>
-              <p className="mt-0.5 text-xs text-[var(--muted)]">
-                {iAmSeller ? 'From ' : 'With '}@{counterparty} · {t.message_count} message{t.message_count === 1 ? '' : 's'}
-              </p>
-              <p className="mt-1 truncate text-sm">{t.latest_content}</p>
-            </div>
             <button
-              onClick={e => { e.stopPropagation(); onOpenListing(t.listing_id) }}
+              onClick={() => onOpenThread(t.listing_id, t.buyer_id)}
+              className="flex flex-1 min-w-0 items-center gap-4 text-left"
+            >
+              <div className="h-14 w-14 flex-none overflow-hidden rounded-lg bg-[var(--paper-deep)]">
+                {t.listing_cover ? (
+                  <img src={t.listing_cover} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-[10px] text-[var(--muted)]">No photo</div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="display-font truncate text-base font-semibold">{t.listing_title}</span>
+                  <span className="flex-none text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                    {relativeDate(t.latest_at)}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-[var(--muted)]">
+                  {iAmSeller ? 'From ' : 'With '}@{counterparty} · {t.message_count} message{t.message_count === 1 ? '' : 's'}
+                </p>
+                <p className="mt-1 truncate text-sm">{t.latest_content}</p>
+              </div>
+            </button>
+            <button
+              onClick={() => onOpenListing(t.listing_id)}
               className="flex-none rounded-full border border-[var(--line)] bg-[var(--glass)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--glass-hover)]"
               aria-label="View listing"
             >
               View
             </button>
-          </button>
+          </div>
         )
       })}
     </div>
@@ -1458,9 +1476,11 @@ function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
     return () => { cancelled = true }
   }, [listingId])
 
-  // Poll messages every 4 seconds.
+  // Poll messages every 4 seconds. Pauses while the tab is hidden.
   useEffect(() => {
     let cancelled = false
+    let interval: ReturnType<typeof setInterval> | null = null
+
     async function refresh() {
       const rows = await dbQuery<Message>(
         `SELECT * FROM messages WHERE listing_id = ? AND buyer_id = ? ORDER BY created_at ASC`,
@@ -1468,14 +1488,36 @@ function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
       )
       if (!cancelled) setMessages(rows)
     }
-    refresh()
-    const interval = setInterval(refresh, 4000)
-    return () => { cancelled = true; clearInterval(interval) }
+
+    function start() {
+      if (interval !== null) return
+      void refresh()
+      interval = setInterval(refresh, 4000)
+    }
+    function stop() {
+      if (interval !== null) { clearInterval(interval); interval = null }
+    }
+    function onVis() { document.hidden ? stop() : start() }
+
+    if (!document.hidden) start()
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      cancelled = true
+      stop()
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [listingId, buyerId])
 
-  // Auto-scroll to bottom on new messages.
+  // Auto-scroll to bottom — only when the user is already near the bottom (so we
+  // don't yank them mid-scroll while reading older messages). Always scroll on
+  // first load or when the user just sent a message (handled in send()).
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    const el = scrollRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    if (nearBottom) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    }
   }, [messages.length])
 
   async function send() {
