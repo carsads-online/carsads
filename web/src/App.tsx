@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { initPro } from '@proappstore/sdk'
 import { ProShell } from '@proappstore/sdk/shell'
+import { useProSubscription } from '@proappstore/sdk/hooks'
 import type {
   Listing,
   ListingPhoto,
@@ -15,7 +16,6 @@ import {
   relativeDate,
   parsePrice,
   parseInt0,
-  isSafeUrl,
   imagePathFor,
   YEAR_OPTIONS,
   genId,
@@ -95,7 +95,7 @@ const COMMON_MAKES = [
 
 export default function App() {
   return (
-    <ProShell app={app} appName="Carsads">
+    <ProShell app={app} appName="Carsads" allowFree={true}>
       <CarsadsApp />
     </ProShell>
   )
@@ -146,15 +146,41 @@ function CarsadsApp() {
         />
       )}
       {view.kind === 'post' && (
-        <PostView mode="create" onDone={id => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'browse' })} />
+        <ProGate>
+          <PostView mode="create" onDone={id => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'browse' })} />
+        </ProGate>
       )}
       {view.kind === 'edit' && (
-        <PostView mode="edit" listingId={view.id} onDone={id => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'detail', id: view.id })} />
+        <ProGate>
+          <PostView mode="edit" listingId={view.id} onDone={id => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'detail', id: view.id })} />
+        </ProGate>
       )}
       {view.kind === 'mine' && (
         <MyListingsView onOpen={id => setView({ kind: 'detail', id })} onPost={() => setView({ kind: 'post' })} />
       )}
       {view.kind === 'saved' && <SavedView onOpen={id => setView({ kind: 'detail', id })} />}
+    </div>
+  )
+}
+
+// ─── Pro gate (post requires subscription) ─────────────────────────────────
+
+function ProGate({ children }: { children: React.ReactNode }) {
+  const { isPro, loading, upgrade } = useProSubscription(app)
+  if (loading) return <CenterMessage text="Checking subscription…" />
+  if (isPro) return <>{children}</>
+  return (
+    <div className="mx-auto max-w-md py-16 text-center">
+      <p className="display-font text-2xl font-bold">Pro required to post</p>
+      <p className="mt-2 text-sm text-[var(--muted)]">
+        Posting a listing needs an active ProAppStore subscription. Browsing and saving are free.
+      </p>
+      <button
+        onClick={() => upgrade()}
+        className="mt-6 rounded-2xl bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[var(--accent-deep)]"
+      >
+        Upgrade to Pro
+      </button>
     </div>
   )
 }
@@ -174,24 +200,17 @@ function TopNav({ view, setView }: { view: View; setView: (v: View) => void }) {
     </button>
   )
   return (
-    <header className="sticky top-0 z-10 -mx-4 mb-6 border-b border-[var(--line)] bg-[var(--glass-strong)] px-4 py-3 backdrop-blur">
-      <div className="flex items-center justify-between gap-4">
-        <button onClick={() => setView({ kind: 'browse' })} className="display-font text-xl font-bold tracking-tight">
-          carsads
-        </button>
-        <nav className="flex items-center gap-1">
-          <Tab active={view.kind === 'browse'} label="Browse" onClick={() => setView({ kind: 'browse' })} />
-          <Tab active={view.kind === 'saved'} label="Saved" onClick={() => setView({ kind: 'saved' })} />
-          <Tab active={view.kind === 'mine'} label="My listings" onClick={() => setView({ kind: 'mine' })} />
-          <button
-            onClick={() => setView({ kind: 'post' })}
-            className="ml-2 rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[var(--accent-deep)]"
-          >
-            + Post
-          </button>
-        </nav>
-      </div>
-    </header>
+    <nav className="mb-6 flex flex-wrap items-center justify-end gap-1 pt-2">
+      <Tab active={view.kind === 'browse'} label="Browse" onClick={() => setView({ kind: 'browse' })} />
+      <Tab active={view.kind === 'saved'} label="Saved" onClick={() => setView({ kind: 'saved' })} />
+      <Tab active={view.kind === 'mine'} label="My listings" onClick={() => setView({ kind: 'mine' })} />
+      <button
+        onClick={() => setView({ kind: 'post' })}
+        className="ml-2 rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[var(--accent-deep)]"
+      >
+        + Post
+      </button>
+    </nav>
   )
 }
 
@@ -264,7 +283,7 @@ function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
 function FilterBar({ filters, setFilters }: { filters: Filters; setFilters: (f: Filters) => void }) {
   const update = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch })
   return (
-    <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-6">
+    <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-7">
       <input
         type="text"
         placeholder="Search…"
@@ -302,6 +321,14 @@ function FilterBar({ filters, setFilters }: { filters: Filters; setFilters: (f: 
         className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
       >
         <option value="">Year from</option>
+        {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+      </select>
+      <select
+        value={filters.maxYear}
+        onChange={e => update({ maxYear: e.target.value })}
+        className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
+      >
+        <option value="">Year to</option>
         {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
       </select>
     </div>
@@ -458,7 +485,7 @@ function DetailView({ id, onBack, onEdit }: { id: string; onBack: () => void; on
               >
                 Edit listing
               </button>
-            ) : isSafeUrl(l.contact_email ? `mailto:${l.contact_email}` : null) || l.contact_email ? (
+            ) : l.contact_email ? (
               <a
                 href={`mailto:${l.contact_email}?subject=${encodeURIComponent('Re: ' + l.title)}`}
                 className="block w-full rounded-2xl bg-[var(--accent)] px-4 py-3 text-center text-sm font-semibold text-white hover:bg-[var(--accent-deep)]"
@@ -1000,7 +1027,7 @@ function MyListingsView({ onOpen, onPost }: { onOpen: (id: string) => void; onPo
 // ─── Saved ──────────────────────────────────────────────────────────────────
 
 function SavedView({ onOpen }: { onOpen: (id: string) => void }) {
-  const [items, setItems] = useState<Listing[] | null>(null)
+  const [items, setItems] = useState<ListingWithPhotos[] | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -1008,11 +1035,20 @@ function SavedView({ onOpen }: { onOpen: (id: string) => void }) {
       const favs = await app.kv.list({ prefix: 'fav:' })
       const ids = favs.map(k => k.slice(4))
       if (ids.length === 0) { if (!cancelled) setItems([]); return }
-      const rows = await dbQuery<Listing>(
-        `SELECT * FROM listings WHERE id IN (${ids.map(() => '?').join(',')})`,
-        ids,
-      )
-      if (!cancelled) setItems(rows)
+      const placeholders = ids.map(() => '?').join(',')
+      const [rows, photos] = await Promise.all([
+        dbQuery<Listing>(`SELECT * FROM listings WHERE id IN (${placeholders})`, ids),
+        dbQuery<ListingPhoto>(
+          `SELECT * FROM listing_photos WHERE listing_id IN (${placeholders}) ORDER BY position ASC`,
+          ids,
+        ),
+      ])
+      const byId = new Map<string, ListingPhoto[]>()
+      for (const p of photos) {
+        if (!byId.has(p.listing_id)) byId.set(p.listing_id, [])
+        byId.get(p.listing_id)!.push(p)
+      }
+      if (!cancelled) setItems(rows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
     })()
     return () => { cancelled = true }
   }, [])
@@ -1024,7 +1060,7 @@ function SavedView({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {items.map(l => (
-        <ListingCard key={l.id} listing={{ ...l, photos: [] }} onClick={() => onOpen(l.id)} />
+        <ListingCard key={l.id} listing={l} onClick={() => onOpen(l.id)} />
       ))}
     </div>
   )
