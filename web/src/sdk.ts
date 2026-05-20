@@ -1,10 +1,13 @@
 import { initPro } from '@proappstore/sdk'
 
+// Carsads — a pro app on https://proappstore.online
+//
+// Per-app data worker provisioned by `pas publish`. The platform's current
+// canonical pattern is the workers.dev hostname rather than a custom
+// proappstore.online subdomain; see PLATFORM-NOTES.md for the convention
+// divergence.
 export const app = initPro({
   appId: 'carsads',
-  // Per-app data worker provisioned by `pas publish`. The platform's current
-  // canonical pattern is the workers.dev hostname rather than a custom subdomain;
-  // see PLATFORM-NOTES.md for the convention divergence.
   dataApiBase: 'https://pas-data-carsads.serge-the-dev.workers.dev',
 })
 

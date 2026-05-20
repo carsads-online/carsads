@@ -2,14 +2,28 @@
   "name": "carsads",
   "private": true,
   "packageManager": "pnpm@10.30.3",
-  "engines": { "node": ">=22" },
-  "pnpm": { "onlyBuiltDependencies": ["esbuild"] },
-  "repository": { "type": "git", "url": "git+https://github.com/carsads-online/carsads.git" },
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carsads-online/carsads.git"
+  },
   "scripts": {
     "dev": "pnpm --filter @carsads/web dev",
     "build": "pnpm --filter @carsads/web build",
     "preview": "pnpm --filter @carsads/web preview",
     "typecheck": "pnpm --filter @carsads/web exec tsc -b",
-    "test": "pnpm --filter @carsads/web exec vitest run"
+    "test": "pnpm --filter @carsads/web exec vitest run",
+    "check:fast": "bash scripts/check-fast.sh",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
   }
 }

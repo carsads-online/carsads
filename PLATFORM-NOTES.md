@@ -131,9 +131,63 @@ but a one-liner in the user CLAUDE.md (e.g. "if `gh repo create` fails
 in a store org, you want `pas publish` / `fas publish` instead") would
 short-circuit the confusion.
 
+## 8. The "proappstore.online link in web/src/" compliance rule conflicts with the canonical data-worker URL
+
+`pas check`'s rule:
+```
+grep -r "proappstore.online" web/src/ | grep -q .
+```
+
+This rule passed for meetup because its `dataApiBase` is
+`data-meetup.proappstore.online`, which mentions the storefront
+hostname in source. Carsads's canonical wiring is
+`pas-data-carsads.serge-the-dev.workers.dev` (see #1) — which doesn't.
+After the canonical migration, the only fix was an inline comment
+referring to `https://proappstore.online`.
+
+So the platform's own canonical URL choice violates the platform's
+own compliance rule. Either:
+- Change the rule to look for the SDK import (`@proappstore/sdk`) instead
+  of the storefront hostname, since that's a stronger signal that the
+  app is a real PAS app.
+- Or pick a canonical data-worker URL that includes proappstore.online.
+- Or move the rule to "the app must render the ProShell-provided
+  storefront link," which is already true via ProShell.
+
+## 9. CI compliance check should live in pre-commit too (cost + DX)
+
+Today every PAS app burns ~30s of GitHub Actions minutes per
+`compliance.yml` run, on every push and every PR commit. At 100 apps
+× 50 commits/mo × 30s = ~42h/month of CI runner time, ~half of which
+runs on already-broken code that pre-commit could have caught.
+
+Carsads now has a husky pre-commit hook (`scripts/check-fast.sh`) that
+runs the static subset of compliance in ~250ms locally. The bundle-size
+check remains CI-only because it needs a build.
+
+**Suggested platform-side moves:**
+- Add `pas check --fast` as a documented mode (static checks only, no
+  build artifacts required). Right now the inline shell script in
+  carsads is the spec.
+- `pas create` should scaffold both `.github/workflows/ci.yml` AND
+  husky + `.husky/pre-commit` with the prepare-hook wiring. Right now
+  CI is partially scaffolded; husky is not.
+- Document the pattern: pre-commit = fast, pre-push (optional) = full,
+  CI = source of truth. The CLI version pin is the contract.
+- Long-term: move the rules into the CLI binary so apps don't ship
+  60 lines of bash per repo, just one `npx -y "@proappstore/cli@x.y.z" check --fast`
+  line in the hook.
+
+**Why this matters for cost specifically:** GHA free minutes are not
+unlimited (2000/mo on free GitHub plans for private repos; throttled
+concurrency on public). Shifting compliance left is a real lever as
+the marketplace grows. Compliance isn't the dominant cost — D1/R2
+traffic will be — but it's the lowest-hanging fruit.
+
 ---
 
 For status: nothing here blocks shipping carsads. The vanity URL works,
 the canonical D1/worker pair is wired up, the registry entry is in
-place, and the app is live at https://carsads.proappstore.online. These
-notes are for the platform team's next sweep.
+place, the pre-commit hook catches violations locally, and the app is
+live at https://carsads.proappstore.online. These notes are for the
+platform team's next sweep.
