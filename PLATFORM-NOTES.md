@@ -1,5 +1,10 @@
 # Platform issues surfaced while building carsads
 
+> **Canonical copy lives in the platform repo** at
+> `pas/platform/docs/publisher-feedback-carsads.md` so the platform
+> team sees this. Edit either side — the two are kept in sync by hand
+> for now (the carsads dev tends to spot issues in context).
+
 This file logs the rough edges I hit going through the official
 "scaffold + provision + publish" path for a new pro app. None are
 blocking — carsads ships and works — but each is worth a platform

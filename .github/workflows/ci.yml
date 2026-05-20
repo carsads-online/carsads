@@ -19,3 +19,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+
+  # Catches "deploy succeeded but the app is broken" — runs on every push
+  # to main, after the standard CI job. Hits the live URL + data worker.
+  smoke:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Give CF Pages a moment to roll over to the new deploy before probing.
+    steps:
+      - name: Wait for deploy to roll
+        run: sleep 30
+      - name: Storefront serves the app
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -L https://carsads.proappstore.online/)
+          echo "carsads.proappstore.online → $code"
+          test "$code" = "200" || exit 1
+      - name: Data worker is healthy
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' https://pas-data-carsads.serge-the-dev.workers.dev/health)
+          echo "data worker /health → $code"
+          test "$code" = "200" || exit 1
+      - name: Title check (catches "deploy completed but old version is served")
+        run: |
+          html=$(curl -sS -L https://carsads.proappstore.online/)
+          echo "$html" | grep -q "<title>Carsads — ProAppStore</title>" || {
+            echo "page served but missing expected <title>"; exit 1;
+          }
