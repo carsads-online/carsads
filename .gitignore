@@ -10,3 +10,6 @@ dist
 
 # pas CLI per-app config (contains provisioned IDs)
 .pas.json
+
+# wrangler local state
+.wrangler/

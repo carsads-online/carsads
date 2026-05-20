@@ -11,7 +11,7 @@ marks `0001_init` as applied in `_migrations` so the in-app migration
 flow won't re-run it.
 
 ```bash
-wrangler d1 execute carsads --remote --file=scripts/schema.sql
+wrangler d1 execute pas-data-carsads --remote --file=scripts/schema.sql
 ```
 
 ## `seed.sql`
@@ -23,7 +23,7 @@ apply for these rows from a normal user account. Photos point to public
 Unsplash URLs. Re-runnable — wipes prior `seed-listing-*` rows first.
 
 ```bash
-wrangler d1 execute carsads --remote --file=scripts/seed.sql
+wrangler d1 execute pas-data-carsads --remote --file=scripts/seed.sql
 ```
 
 ## Cleanup
@@ -31,7 +31,7 @@ wrangler d1 execute carsads --remote --file=scripts/seed.sql
 To remove all seed data later:
 
 ```bash
-wrangler d1 execute carsads --remote --command \
+wrangler d1 execute pas-data-carsads --remote --command \
   "DELETE FROM listing_photos WHERE listing_id LIKE 'seed-listing-%'; \
    DELETE FROM listings WHERE id LIKE 'seed-listing-%';"
 ```

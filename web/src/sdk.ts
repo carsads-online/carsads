@@ -2,7 +2,10 @@ import { initPro } from '@proappstore/sdk'
 
 export const app = initPro({
   appId: 'carsads',
-  dataApiBase: 'https://data-carsads.proappstore.online',
+  // Per-app data worker provisioned by `pas publish`. The platform's current
+  // canonical pattern is the workers.dev hostname rather than a custom subdomain;
+  // see PLATFORM-NOTES.md for the convention divergence.
+  dataApiBase: 'https://pas-data-carsads.serge-the-dev.workers.dev',
 })
 
 export async function dbQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
