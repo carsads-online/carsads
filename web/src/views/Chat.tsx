@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Listing, Message } from '../types.ts'
-import { formatPrice, genId, relativeDate } from '../utils.ts'
+import { formatPrice, genId } from '../utils.ts'
 import { app, dbExec, dbQuery } from '../sdk.ts'
 import { BackButton, CenterMessage, EmptyState } from '../shared.tsx'
+import { MessageBubble } from './MessageBubble.tsx'
 
 export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
   listingId: string
@@ -161,31 +162,9 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
           </p>
         ) : (
           <div className="space-y-2">
-            {messages.map(m => {
-              const mine = m.sender_id === me?.id
-              return (
-                <div key={m.id} className={'flex ' + (mine ? 'justify-end' : 'justify-start')}>
-                  <div
-                    className={
-                      'max-w-[80%] rounded-2xl px-3 py-2 text-sm ' +
-                      (mine
-                        ? 'bg-[var(--accent)] text-white'
-                        : 'border border-[var(--line)] bg-[var(--paper-deep)]')
-                    }
-                  >
-                    {!mine && (
-                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-70">
-                        @{m.sender_login ?? 'user'}
-                      </p>
-                    )}
-                    <p className="whitespace-pre-wrap break-words">{m.content}</p>
-                    <p className={'mt-1 text-[10px] ' + (mine ? 'text-white/70' : 'text-[var(--muted)]')}>
-                      {relativeDate(m.created_at)}
-                    </p>
-                  </div>
-                </div>
-              )
-            })}
+            {messages.map(m => (
+              <MessageBubble key={m.id} m={m} mine={m.sender_id === me?.id} />
+            ))}
           </div>
         )}
       </div>

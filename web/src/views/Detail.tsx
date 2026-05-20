@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { Listing, ListingPhoto, ListingWithPhotos } from '../types.ts'
-import { formatMileage, formatPrice, relativeDate } from '../utils.ts'
+import { formatPrice, relativeDate } from '../utils.ts'
 import { app, dbQuery } from '../sdk.ts'
 import { BackButton, CenterMessage, EmptyState, ListingCard } from '../shared.tsx'
+import { Lightbox } from './Lightbox.tsx'
+import { SpecsGrid } from './SpecsGrid.tsx'
 
 export function DetailView({ id, onBack, onEdit, onOpen, onMessage }: {
   id: string
@@ -249,81 +251,3 @@ export function DetailView({ id, onBack, onEdit, onOpen, onMessage }: {
   )
 }
 
-function Lightbox({ photos, index, title, onClose, onChange }: {
-  photos: ListingPhoto[]
-  index: number
-  title: string
-  onClose: () => void
-  onChange: (i: number) => void
-}) {
-  const photo = photos[index]
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <button
-        onClick={e => { e.stopPropagation(); onClose() }}
-        className="absolute right-4 top-4 rounded-full bg-white/10 px-3 py-1.5 text-sm font-semibold text-white hover:bg-white/20"
-        aria-label="Close"
-      >
-        ✕
-      </button>
-      {photos.length > 1 && (
-        <>
-          <button
-            onClick={e => { e.stopPropagation(); onChange((index - 1 + photos.length) % photos.length) }}
-            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-4 py-3 text-lg font-semibold text-white hover:bg-white/20"
-            aria-label="Previous photo"
-          >
-            ‹
-          </button>
-          <button
-            onClick={e => { e.stopPropagation(); onChange((index + 1) % photos.length) }}
-            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-4 py-3 text-lg font-semibold text-white hover:bg-white/20"
-            aria-label="Next photo"
-          >
-            ›
-          </button>
-        </>
-      )}
-      <img
-        src={photo.url}
-        alt={title}
-        onClick={e => e.stopPropagation()}
-        className="max-h-[92vh] max-w-[92vw] object-contain"
-      />
-      {photos.length > 1 && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
-          {index + 1} / {photos.length}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SpecsGrid({ l }: { l: Listing }) {
-  const items: [string, string | null][] = [
-    ['Year', String(l.year)],
-    ['Mileage', formatMileage(l.mileage_km)],
-    ['Make', l.make],
-    ['Model', l.model],
-    ['Body', l.body_type],
-    ['Fuel', l.fuel_type],
-    ['Transmission', l.transmission],
-    ['Color', l.color],
-    ['Location', l.location],
-  ]
-  return (
-    <dl className="mt-5 grid grid-cols-2 gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-quiet)] p-4 sm:grid-cols-3">
-      {items.filter(([, v]) => v).map(([k, v]) => (
-        <div key={k}>
-          <dt className="text-[10px] uppercase tracking-wide text-[var(--muted)]">{k}</dt>
-          <dd className="text-sm font-medium">{v}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}

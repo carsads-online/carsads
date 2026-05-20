@@ -4,23 +4,17 @@ import type {
   Listing,
   ListingPhoto,
   ListingWithPhotos,
-  Sort,
 } from '../types.ts'
-import {
-  BODY_TYPES,
-  COMMON_MAKES,
-  EMPTY_FILTERS,
-  FUEL_TYPES,
-  SORT_LABELS,
-} from '../types.ts'
-import { formatPrice, parseInt0, parsePrice, YEAR_OPTIONS } from '../utils.ts'
-import { app, dbQuery } from '../sdk.ts'
+import { EMPTY_FILTERS } from '../types.ts'
+import { parseInt0, parsePrice } from '../utils.ts'
+import { dbQuery } from '../sdk.ts'
 import { CenterMessage, EmptyState, ListingCard } from '../shared.tsx'
+import { FilterBar } from './FilterBar.tsx'
+import { RecentStrip } from './RecentStrip.tsx'
 
 export function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [items, setItems] = useState<ListingWithPhotos[] | null>(null)
-  const [recent, setRecent] = useState<ListingWithPhotos[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -40,38 +34,6 @@ export function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
         byId.get(p.listing_id)!.push(p)
       }
       if (!cancelled) setItems(rows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
-    })()
-    return () => { cancelled = true }
-  }, [])
-
-  // Recently viewed (KV).
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const raw = await app.kv.get<unknown>('recent').catch(() => null)
-      const stored: { id: string; ts: number }[] = Array.isArray(raw)
-        ? raw.filter((r): r is { id: string; ts: number } =>
-            !!r && typeof r === 'object' && typeof (r as { id?: unknown }).id === 'string',
-          )
-        : []
-      const ids = stored.slice(0, 5).map(r => r.id)
-      if (ids.length === 0) return
-      const rows = await dbQuery<Listing>(
-        `SELECT * FROM listings WHERE id IN (${ids.map(() => '?').join(',')})`,
-        ids,
-      )
-      // Preserve KV order
-      const rowMap = new Map(rows.map(r => [r.id, r]))
-      const ordered = ids.map(id => rowMap.get(id)).filter((r): r is Listing => !!r)
-      const ph = ordered.length
-        ? await dbQuery<ListingPhoto>(
-            `SELECT * FROM listing_photos WHERE listing_id IN (${ordered.map(() => '?').join(',')}) AND position = 0`,
-            ordered.map(r => r.id),
-          )
-        : []
-      const coverById = new Map<string, ListingPhoto[]>()
-      for (const p of ph) coverById.set(p.listing_id, [p])
-      if (!cancelled) setRecent(ordered.map(r => ({ ...r, photos: coverById.get(r.id) ?? [] })))
     })()
     return () => { cancelled = true }
   }, [])
@@ -111,32 +73,7 @@ export function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
 
   return (
     <div>
-      {recent.length > 0 && (
-        <section className="mb-6">
-          <h2 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">Recently viewed</h2>
-          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2">
-            {recent.map(r => (
-              <button
-                key={r.id}
-                onClick={() => onOpen(r.id)}
-                className="flex w-40 flex-none flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--card-gradient)] text-left shadow-[var(--shadow-card)] hover:border-[var(--line-strong)]"
-              >
-                <div className="aspect-[4/3] w-full bg-[var(--paper-deep)]">
-                  {r.photos[0]?.url ? (
-                    <img src={r.photos[0].url} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[10px] text-[var(--muted)]">No photo</div>
-                  )}
-                </div>
-                <div className="p-2">
-                  <p className="display-font line-clamp-1 text-xs font-semibold">{r.title}</p>
-                  <p className="mt-0.5 text-[10px] text-[var(--accent-deep)]">{formatPrice(r.price_cents)}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+      <RecentStrip onOpen={onOpen} />
       <FilterBar filters={filters} setFilters={setFilters} />
       {items && hasActiveFilters && (
         <div className="mb-4 flex items-center justify-between text-xs text-[var(--muted)]">
@@ -173,67 +110,6 @@ export function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function FilterBar({ filters, setFilters }: { filters: Filters; setFilters: (f: Filters) => void }) {
-  const update = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch })
-  const inputClass = "rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"
-  return (
-    <div className="mb-6 space-y-2">
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <input
-          type="text"
-          placeholder="Search…"
-          value={filters.q}
-          onChange={e => update({ q: e.target.value })}
-          className={`col-span-2 ${inputClass}`}
-        />
-        <select value={filters.make} onChange={e => update({ make: e.target.value })} className={inputClass}>
-          <option value="">Any make</option>
-          {COMMON_MAKES.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
-        <select value={filters.sort} onChange={e => update({ sort: e.target.value as Sort })} className={inputClass}>
-          {(Object.keys(SORT_LABELS) as Sort[]).map(s => (
-            <option key={s} value={s}>{SORT_LABELS[s]}</option>
-          ))}
-        </select>
-      </div>
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
-        <select value={filters.bodyType} onChange={e => update({ bodyType: e.target.value })} className={inputClass}>
-          <option value="">Any body</option>
-          {BODY_TYPES.map(b => <option key={b} value={b}>{b}</option>)}
-        </select>
-        <select value={filters.fuelType} onChange={e => update({ fuelType: e.target.value })} className={inputClass}>
-          <option value="">Any fuel</option>
-          {FUEL_TYPES.map(f => <option key={f} value={f}>{f}</option>)}
-        </select>
-        <input
-          type="text"
-          inputMode="numeric"
-          placeholder="Min price"
-          value={filters.minPrice}
-          onChange={e => update({ minPrice: e.target.value })}
-          className={inputClass}
-        />
-        <input
-          type="text"
-          inputMode="numeric"
-          placeholder="Max price"
-          value={filters.maxPrice}
-          onChange={e => update({ maxPrice: e.target.value })}
-          className={inputClass}
-        />
-        <select value={filters.minYear} onChange={e => update({ minYear: e.target.value })} className={inputClass}>
-          <option value="">Year from</option>
-          {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
-        <select value={filters.maxYear} onChange={e => update({ maxYear: e.target.value })} className={inputClass}>
-          <option value="">Year to</option>
-          {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
-      </div>
     </div>
   )
 }

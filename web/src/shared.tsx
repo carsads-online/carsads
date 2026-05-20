@@ -30,6 +30,15 @@ export function BackButton({ onClick }: { onClick: () => void }) {
   )
 }
 
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{label}</span>
+      {children}
+    </label>
+  )
+}
+
 export function ListingCard({ listing, onClick }: { listing: ListingWithPhotos; onClick: () => void }) {
   const cover = listing.photos[0]?.url
   return (

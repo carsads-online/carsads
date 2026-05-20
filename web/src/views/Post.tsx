@@ -14,7 +14,7 @@ import {
   YEAR_OPTIONS,
 } from '../utils.ts'
 import { app, dbQuery } from '../sdk.ts'
-import { BackButton, CenterMessage } from '../shared.tsx'
+import { BackButton, CenterMessage, Field } from '../shared.tsx'
 
 interface FormState {
   title: string
@@ -394,11 +394,3 @@ export function PostView({
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{label}</span>
-      {children}
-    </label>
-  )
-}
