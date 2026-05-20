@@ -6,6 +6,24 @@ on:
   pull_request:
     branches: [main]
 
+# carsads is in carsads-online org, not proappstore-online, so GitHub
+# Actions reusable-workflow access is restricted across orgs. Inline
+# the same shape as the reusable workflow — single job, no secrets,
+# CLI pinned for supply-chain safety (S1). When carsads-online is
+# whitelisted to consume proappstore-online's reusable workflow, this
+# file can be replaced with the 10-line caller.
+
 jobs:
-  ci:
-    uses: proappstore-online/proappstore/.github/workflows/app-ci.yml@main
+  compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Platform compliance
+        run: npx -y "@proappstore/cli@2.1.2" check
