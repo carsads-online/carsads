@@ -14,7 +14,7 @@ import { ChatView } from './views/Chat.tsx'
 
 export default function App() {
   return (
-    <ProShell app={app} appName="Carsads">
+    <ProShell app={app} appName="Carsads" allowFree>
       <CarsadsApp />
     </ProShell>
   )
