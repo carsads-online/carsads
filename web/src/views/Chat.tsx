@@ -16,8 +16,13 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [pollError, setPollError] = useState<string | null>(null)
   const me = app.auth.user
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Synchronous guards — state updates land too late to block a rapid second call.
+  const sendingRef = useRef(false)
+  const pollInFlight = useRef(false)
 
   // Load listing once.
   useEffect(() => {
@@ -40,15 +45,22 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
     let interval: ReturnType<typeof setInterval> | null = null
 
     async function refresh() {
+      if (pollInFlight.current) return
+      pollInFlight.current = true
       try {
         const rows = await dbQuery<Message>(
           `SELECT * FROM messages WHERE listing_id = ? AND buyer_id = ? ORDER BY created_at ASC`,
           [listingId, buyerId],
         )
-        if (!cancelled) setMessages(rows)
+        if (!cancelled) {
+          setMessages(rows)
+          setPollError(null)
+        }
       } catch (e) {
         console.error('Failed to load messages:', e)
-        if (!cancelled) setLoadError('Failed to load data. Please try again.')
+        if (!cancelled) setPollError('Message refresh failed — retrying.')
+      } finally {
+        pollInFlight.current = false
       }
     }
 
@@ -85,7 +97,8 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
 
   async function send() {
     const trimmed = content.trim()
-    if (!trimmed || !me) return
+    if (sendingRef.current || !trimmed || !me) return
+    sendingRef.current = true
     setSending(true)
     try {
       const msg: Message = {
@@ -108,9 +121,12 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
       )
       setMessages(m => [...m, msg])
       setContent('')
+      setSendError(null)
     } catch (e) {
       console.error('Send failed', e)
+      setSendError('Failed to send — your message is preserved. Try again.')
     } finally {
+      sendingRef.current = false
       setSending(false)
     }
   }
@@ -181,6 +197,8 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
         )}
       </div>
 
+      {pollError && <p className="mb-2 text-xs text-[var(--warning)]">{pollError}</p>}
+
       <form
         onSubmit={e => { e.preventDefault(); void send() }}
         className="flex items-end gap-2"
@@ -191,6 +209,7 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
           onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
+              if (sendingRef.current) return
               void send()
             }
           }}
@@ -207,6 +226,7 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
           Send
         </button>
       </form>
+      {sendError && <p className="mt-2 text-sm text-[var(--error)]">{sendError}</p>}
     </div>
   )
 }
