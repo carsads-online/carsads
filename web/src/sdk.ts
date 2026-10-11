@@ -12,13 +12,8 @@ export const app = initPro({
 })
 
 export async function dbQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
-  try {
-    const r = await app.db.query<T>(sql, params)
-    return r.rows
-  } catch (err) {
-    console.error('DB query failed:', sql, err)
-    return []
-  }
+  const r = await app.db.query<T>(sql, params)
+  return r.rows
 }
 
 export async function dbExec(sql: string, params?: unknown[]) {

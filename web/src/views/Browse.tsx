@@ -15,25 +15,31 @@ import { RecentStrip } from './RecentStrip.tsx'
 export function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [items, setItems] = useState<ListingWithPhotos[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const rows = await dbQuery<Listing>(
-        `SELECT * FROM listings WHERE status = 'active' ORDER BY created_at DESC LIMIT 200`,
-      )
-      const photos = rows.length
-        ? await dbQuery<ListingPhoto>(
-            `SELECT * FROM listing_photos WHERE listing_id IN (${rows.map(() => '?').join(',')}) ORDER BY position ASC`,
-            rows.map(r => r.id),
-          )
-        : []
-      const byId = new Map<string, ListingPhoto[]>()
-      for (const p of photos) {
-        if (!byId.has(p.listing_id)) byId.set(p.listing_id, [])
-        byId.get(p.listing_id)!.push(p)
+      try {
+        const rows = await dbQuery<Listing>(
+          `SELECT * FROM listings WHERE status = 'active' ORDER BY created_at DESC LIMIT 200`,
+        )
+        const photos = rows.length
+          ? await dbQuery<ListingPhoto>(
+              `SELECT * FROM listing_photos WHERE listing_id IN (${rows.map(() => '?').join(',')}) ORDER BY position ASC`,
+              rows.map(r => r.id),
+            )
+          : []
+        const byId = new Map<string, ListingPhoto[]>()
+        for (const p of photos) {
+          if (!byId.has(p.listing_id)) byId.set(p.listing_id, [])
+          byId.get(p.listing_id)!.push(p)
+        }
+        if (!cancelled) setItems(rows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
+      } catch (e) {
+        console.error('Failed to load listings:', e)
+        if (!cancelled) setError('Failed to load data. Please try again.')
       }
-      if (!cancelled) setItems(rows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
     })()
     return () => { cancelled = true }
   }, [])
@@ -70,6 +76,16 @@ export function BrowseView({ onOpen }: { onOpen: (id: string) => void }) {
     filters.q !== '' || filters.make !== '' || filters.bodyType !== '' || filters.fuelType !== '' ||
     filters.minPrice !== '' || filters.maxPrice !== '' || filters.minYear !== '' || filters.maxYear !== '' ||
     filters.sort !== 'newest'
+
+  if (error) {
+    return (
+      <div>
+        <RecentStrip onOpen={onOpen} />
+        <FilterBar filters={filters} setFilters={setFilters} />
+        <CenterMessage text={error} />
+      </div>
+    )
+  }
 
   return (
     <div>

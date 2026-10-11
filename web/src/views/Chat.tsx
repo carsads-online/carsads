@@ -15,6 +15,7 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
   const [messages, setMessages] = useState<Message[]>([])
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const me = app.auth.user
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -22,8 +23,13 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const rows = await dbQuery<Listing>(`SELECT * FROM listings WHERE id = ? LIMIT 1`, [listingId])
-      if (!cancelled) setListing(rows[0] ?? 'missing')
+      try {
+        const rows = await dbQuery<Listing>(`SELECT * FROM listings WHERE id = ? LIMIT 1`, [listingId])
+        if (!cancelled) setListing(rows[0] ?? 'missing')
+      } catch (e) {
+        console.error('Failed to load chat listing:', e)
+        if (!cancelled) setLoadError('Failed to load data. Please try again.')
+      }
     })()
     return () => { cancelled = true }
   }, [listingId])
@@ -34,11 +40,16 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
     let interval: ReturnType<typeof setInterval> | null = null
 
     async function refresh() {
-      const rows = await dbQuery<Message>(
-        `SELECT * FROM messages WHERE listing_id = ? AND buyer_id = ? ORDER BY created_at ASC`,
-        [listingId, buyerId],
-      )
-      if (!cancelled) setMessages(rows)
+      try {
+        const rows = await dbQuery<Message>(
+          `SELECT * FROM messages WHERE listing_id = ? AND buyer_id = ? ORDER BY created_at ASC`,
+          [listingId, buyerId],
+        )
+        if (!cancelled) setMessages(rows)
+      } catch (e) {
+        console.error('Failed to load messages:', e)
+        if (!cancelled) setLoadError('Failed to load data. Please try again.')
+      }
     }
 
     function start() {
@@ -104,6 +115,7 @@ export function ChatView({ listingId, buyerId, onBack, onOpenListing }: {
     }
   }
 
+  if (loadError) return <CenterMessage text={loadError} />
   if (listing === null) return <CenterMessage text="Loading chat…" />
   if (listing === 'missing') {
     return (

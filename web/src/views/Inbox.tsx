@@ -9,13 +9,15 @@ export function InboxView({ onOpenThread, onOpenListing }: {
   onOpenListing: (id: string) => void
 }) {
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const me = app.auth.user?.id
-      if (!me) { setThreads([]); return }
-      const rows = await dbQuery<ThreadSummary>(
+      try {
+        const me = app.auth.user?.id
+        if (!me) { setThreads([]); return }
+        const rows = await dbQuery<ThreadSummary>(
         `SELECT
            m.listing_id, m.buyer_id,
            (SELECT buyer_login FROM messages WHERE listing_id = m.listing_id AND buyer_id = m.buyer_id AND buyer_login IS NOT NULL LIMIT 1) AS buyer_login,
@@ -30,25 +32,30 @@ export function InboxView({ onOpenThread, onOpenListing }: {
          WHERE m.buyer_id = ?1 OR l.seller_id = ?1
          GROUP BY m.listing_id, m.buyer_id
          ORDER BY latest_at DESC`,
-        [me],
-      )
-      if (cancelled) return
-      // Fetch cover photo (position=0) for each unique listing
-      const listingIds = Array.from(new Set(rows.map(r => r.listing_id)))
-      const covers = new Map<string, string>()
-      if (listingIds.length > 0) {
-        const ph = await dbQuery<{ listing_id: string; url: string }>(
-          `SELECT listing_id, url FROM listing_photos
-           WHERE listing_id IN (${listingIds.map(() => '?').join(',')}) AND position = 0`,
-          listingIds,
+          [me],
         )
-        for (const p of ph) covers.set(p.listing_id, p.url)
+        if (cancelled) return
+        // Fetch cover photo (position=0) for each unique listing
+        const listingIds = Array.from(new Set(rows.map(r => r.listing_id)))
+        const covers = new Map<string, string>()
+        if (listingIds.length > 0) {
+          const ph = await dbQuery<{ listing_id: string; url: string }>(
+            `SELECT listing_id, url FROM listing_photos
+             WHERE listing_id IN (${listingIds.map(() => '?').join(',')}) AND position = 0`,
+            listingIds,
+          )
+          for (const p of ph) covers.set(p.listing_id, p.url)
+        }
+        if (!cancelled) setThreads(rows.map(r => ({ ...r, listing_cover: covers.get(r.listing_id) ?? null })))
+      } catch (e) {
+        console.error('Failed to load inbox:', e)
+        if (!cancelled) setError('Failed to load data. Please try again.')
       }
-      if (!cancelled) setThreads(rows.map(r => ({ ...r, listing_cover: covers.get(r.listing_id) ?? null })))
     })()
     return () => { cancelled = true }
   }, [])
 
+  if (error) return <CenterMessage text={error} />
   if (!threads) return <CenterMessage text="Loading inbox…" />
   if (threads.length === 0) {
     return <EmptyState title="No conversations yet" hint="Message a seller from a listing detail page — or wait for buyers to reach out." />

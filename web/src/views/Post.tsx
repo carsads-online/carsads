@@ -16,7 +16,7 @@ import {
 import { app, dbQuery } from '../sdk.ts'
 import { BackButton, CenterMessage, Field } from '../shared.tsx'
 
-interface FormState {
+export interface FormState {
   title: string
   make: string
   model: string
@@ -52,6 +52,28 @@ const EMPTY_FORM: FormState = {
   lng: null,
 }
 
+export function parseMileage(input: string): number | null {
+  const trimmed = input.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const mileage = Number(trimmed)
+  return Number.isFinite(mileage) && Number.isInteger(mileage) && mileage >= 0 ? mileage : null
+}
+
+export function validatePostForm(form: FormState): string | null {
+  const priceCents = parsePrice(form.price)
+  const mileage = parseMileage(form.mileage)
+  const year = parseInt0(form.year)
+  if (!form.title.trim()) return 'Title is required.'
+  if (!form.make.trim()) return 'Make is required.'
+  if (!form.model.trim()) return 'Model is required.'
+  if (!year) return 'Year is required.'
+  if (priceCents === null || priceCents <= 0) return 'A valid price is required.'
+  if (mileage === null) return 'Mileage is required.'
+  if (form.contact_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contact_email.trim())) return 'A valid contact email is required.'
+  if (!form.location.trim()) return 'Location is required.'
+  return null
+}
+
 export function PostView({
   mode,
   listingId,
@@ -69,39 +91,45 @@ export function PostView({
   const [submitting, setSubmitting] = useState(false)
   const [uploading, setUploading] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const idRef = useRef<string>(listingId ?? genId())
 
   useEffect(() => {
     if (mode !== 'edit' || !listingId) return
     let cancelled = false
     ;(async () => {
-      const [rows, ps] = await Promise.all([
-        dbQuery<Listing>(`SELECT * FROM listings WHERE id = ? LIMIT 1`, [listingId]),
-        dbQuery<ListingPhoto>(`SELECT * FROM listing_photos WHERE listing_id = ? ORDER BY position ASC`, [listingId]),
-      ])
-      if (cancelled) return
-      const l = rows[0]
-      if (l) {
-        setForm({
-          title: l.title,
-          make: l.make,
-          model: l.model,
-          year: String(l.year),
-          price: (l.price_cents / 100).toString(),
-          mileage: String(l.mileage_km),
-          fuel_type: l.fuel_type ?? '',
-          transmission: l.transmission ?? '',
-          body_type: l.body_type ?? '',
-          color: l.color ?? '',
-          description: l.description ?? '',
-          location: l.location,
-          contact_email: l.contact_email ?? '',
-          lat: l.lat,
-          lng: l.lng,
-        })
-        setPhotos(ps.map(p => p.url))
+      try {
+        const [rows, ps] = await Promise.all([
+          dbQuery<Listing>(`SELECT * FROM listings WHERE id = ? LIMIT 1`, [listingId]),
+          dbQuery<ListingPhoto>(`SELECT * FROM listing_photos WHERE listing_id = ? ORDER BY position ASC`, [listingId]),
+        ])
+        if (cancelled) return
+        const l = rows[0]
+        if (l) {
+          setForm({
+            title: l.title,
+            make: l.make,
+            model: l.model,
+            year: String(l.year),
+            price: (l.price_cents / 100).toString(),
+            mileage: String(l.mileage_km),
+            fuel_type: l.fuel_type ?? '',
+            transmission: l.transmission ?? '',
+            body_type: l.body_type ?? '',
+            color: l.color ?? '',
+            description: l.description ?? '',
+            location: l.location,
+            contact_email: l.contact_email ?? '',
+            lat: l.lat,
+            lng: l.lng,
+          })
+          setPhotos(ps.map(p => p.url))
+        }
+        setLoaded(true)
+      } catch (e) {
+        console.error('Failed to load listing for editing:', e)
+        if (!cancelled) setLoadError('Failed to load data. Please try again.')
       }
-      setLoaded(true)
     })()
     return () => { cancelled = true }
   }, [mode, listingId])
@@ -142,16 +170,11 @@ export function PostView({
 
   async function submit() {
     setError(null)
+    const validationError = validatePostForm(form)
+    if (validationError) return setError(validationError)
     const priceCents = parsePrice(form.price)
-    const mileage = parseInt0(form.mileage)
+    const mileage = parseMileage(form.mileage)
     const year = parseInt0(form.year)
-    if (!form.title.trim()) return setError('Title is required.')
-    if (!form.make.trim()) return setError('Make is required.')
-    if (!form.model.trim()) return setError('Model is required.')
-    if (!year) return setError('Year is required.')
-    if (priceCents === null || priceCents <= 0) return setError('A valid price is required.')
-    if (!mileage && mileage !== 0) return setError('Mileage is required.')
-    if (!form.location.trim()) return setError('Location is required.')
 
     setSubmitting(true)
     try {
@@ -167,10 +190,10 @@ export function PostView({
                     contact_email, status, seller_id, seller_login, created_at)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
             params: [
-              id, form.title.trim(), form.make.trim(), form.model.trim(), year, priceCents, mileage,
+              id, form.title.trim(), form.make.trim(), form.model.trim(), year, priceCents!, mileage!,
               form.fuel_type || null, form.transmission || null, form.body_type || null,
               form.color || null, form.description || null, form.location.trim(),
-              form.lat, form.lng, form.contact_email || null,
+              form.lat, form.lng, form.contact_email.trim() || null,
               user.id, user.login ?? null, now,
             ],
           }
@@ -180,10 +203,10 @@ export function PostView({
                     lat=?, lng=?, contact_email=?
                   WHERE id = ? AND seller_id = ?`,
             params: [
-              form.title.trim(), form.make.trim(), form.model.trim(), year, priceCents, mileage,
+              form.title.trim(), form.make.trim(), form.model.trim(), year, priceCents!, mileage!,
               form.fuel_type || null, form.transmission || null, form.body_type || null,
               form.color || null, form.description || null, form.location.trim(),
-              form.lat, form.lng, form.contact_email || null,
+              form.lat, form.lng, form.contact_email.trim() || null,
               id, user.id,
             ],
           }
@@ -207,6 +230,7 @@ export function PostView({
     }
   }
 
+  if (loadError) return <CenterMessage text={loadError} />
   if (!loaded) return <CenterMessage text="Loading…" />
 
   const inputClass = "w-full rounded-xl border border-[var(--line)] bg-[var(--glass)] px-3 py-2 text-sm"

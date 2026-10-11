@@ -5,31 +5,38 @@ import { CenterMessage, EmptyState, ListingCard } from '../shared.tsx'
 
 export function SavedView({ onOpen }: { onOpen: (id: string) => void }) {
   const [items, setItems] = useState<ListingWithPhotos[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const favs = await app.kv.list({ prefix: 'fav:' })
-      const ids = favs.map(k => k.slice(4))
-      if (ids.length === 0) { if (!cancelled) setItems([]); return }
-      const placeholders = ids.map(() => '?').join(',')
-      const [rows, photos] = await Promise.all([
-        dbQuery<Listing>(`SELECT * FROM listings WHERE id IN (${placeholders})`, ids),
-        dbQuery<ListingPhoto>(
-          `SELECT * FROM listing_photos WHERE listing_id IN (${placeholders}) ORDER BY position ASC`,
-          ids,
-        ),
-      ])
-      const byId = new Map<string, ListingPhoto[]>()
-      for (const p of photos) {
-        if (!byId.has(p.listing_id)) byId.set(p.listing_id, [])
-        byId.get(p.listing_id)!.push(p)
+      try {
+        const favs = await app.kv.list({ prefix: 'fav:' })
+        const ids = favs.map(k => k.slice(4))
+        if (ids.length === 0) { if (!cancelled) setItems([]); return }
+        const placeholders = ids.map(() => '?').join(',')
+        const [rows, photos] = await Promise.all([
+          dbQuery<Listing>(`SELECT * FROM listings WHERE id IN (${placeholders})`, ids),
+          dbQuery<ListingPhoto>(
+            `SELECT * FROM listing_photos WHERE listing_id IN (${placeholders}) ORDER BY position ASC`,
+            ids,
+          ),
+        ])
+        const byId = new Map<string, ListingPhoto[]>()
+        for (const p of photos) {
+          if (!byId.has(p.listing_id)) byId.set(p.listing_id, [])
+          byId.get(p.listing_id)!.push(p)
+        }
+        if (!cancelled) setItems(rows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
+      } catch (e) {
+        console.error('Failed to load saved listings:', e)
+        if (!cancelled) setError('Failed to load data. Please try again.')
       }
-      if (!cancelled) setItems(rows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
     })()
     return () => { cancelled = true }
   }, [])
 
+  if (error) return <CenterMessage text={error} />
   if (!items) return <CenterMessage text="Loading…" />
   if (items.length === 0) {
     return <EmptyState title="Nothing saved yet" hint="Tap Save on any listing to keep it here." />

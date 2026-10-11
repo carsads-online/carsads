@@ -7,15 +7,21 @@ import { CenterMessage, EmptyState } from '../shared.tsx'
 export function MyListingsView({ onOpen, onPost }: { onOpen: (id: string) => void; onPost: () => void }) {
   const [items, setItems] = useState<Listing[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   async function reload() {
     const user = app.auth.user
     if (!user) { setItems([]); return }
-    const rows = await dbQuery<Listing>(
-      `SELECT * FROM listings WHERE seller_id = ? ORDER BY created_at DESC`,
-      [user.id],
-    )
-    setItems(rows)
+    try {
+      const rows = await dbQuery<Listing>(
+        `SELECT * FROM listings WHERE seller_id = ? ORDER BY created_at DESC`,
+        [user.id],
+      )
+      setItems(rows)
+    } catch (e) {
+      console.error('Failed to load listings:', e)
+      setError('Failed to load data. Please try again.')
+    }
   }
 
   useEffect(() => { void reload() }, [])
@@ -45,6 +51,7 @@ export function MyListingsView({ onOpen, onPost }: { onOpen: (id: string) => voi
     setBusy(null)
   }
 
+  if (error) return <CenterMessage text={error} />
   if (!items) return <CenterMessage text="Loading…" />
   if (items.length === 0) {
     return (

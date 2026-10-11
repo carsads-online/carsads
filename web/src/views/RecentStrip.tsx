@@ -5,38 +5,45 @@ import { app, dbQuery } from '../sdk.ts'
 
 export function RecentStrip({ onOpen }: { onOpen: (id: string) => void }) {
   const [recent, setRecent] = useState<ListingWithPhotos[]>([])
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const raw = await app.kv.get<unknown>('recent').catch(() => null)
-      const stored: { id: string; ts: number }[] = Array.isArray(raw)
-        ? raw.filter((r): r is { id: string; ts: number } =>
-            !!r && typeof r === 'object' && typeof (r as { id?: unknown }).id === 'string',
-          )
-        : []
-      const ids = stored.slice(0, 5).map(r => r.id)
-      if (ids.length === 0) return
-      const rows = await dbQuery<Listing>(
-        `SELECT * FROM listings WHERE id IN (${ids.map(() => '?').join(',')})`,
-        ids,
-      )
-      // Preserve KV order
-      const rowMap = new Map(rows.map(r => [r.id, r]))
-      const ordered = ids.map(id => rowMap.get(id)).filter((r): r is Listing => !!r)
-      const ph = ordered.length
-        ? await dbQuery<ListingPhoto>(
-            `SELECT * FROM listing_photos WHERE listing_id IN (${ordered.map(() => '?').join(',')}) AND position = 0`,
-            ordered.map(r => r.id),
-          )
-        : []
-      const coverById = new Map<string, ListingPhoto[]>()
-      for (const p of ph) coverById.set(p.listing_id, [p])
-      if (!cancelled) setRecent(ordered.map(r => ({ ...r, photos: coverById.get(r.id) ?? [] })))
+      try {
+        const raw = await app.kv.get<unknown>('recent').catch(() => null)
+        const stored: { id: string; ts: number }[] = Array.isArray(raw)
+          ? raw.filter((r): r is { id: string; ts: number } =>
+              !!r && typeof r === 'object' && typeof (r as { id?: unknown }).id === 'string',
+            )
+          : []
+        const ids = stored.slice(0, 5).map(r => r.id)
+        if (ids.length === 0) return
+        const rows = await dbQuery<Listing>(
+          `SELECT * FROM listings WHERE id IN (${ids.map(() => '?').join(',')})`,
+          ids,
+        )
+        // Preserve KV order
+        const rowMap = new Map(rows.map(r => [r.id, r]))
+        const ordered = ids.map(id => rowMap.get(id)).filter((r): r is Listing => !!r)
+        const ph = ordered.length
+          ? await dbQuery<ListingPhoto>(
+              `SELECT * FROM listing_photos WHERE listing_id IN (${ordered.map(() => '?').join(',')}) AND position = 0`,
+              ordered.map(r => r.id),
+            )
+          : []
+        const coverById = new Map<string, ListingPhoto[]>()
+        for (const p of ph) coverById.set(p.listing_id, [p])
+        if (!cancelled) setRecent(ordered.map(r => ({ ...r, photos: coverById.get(r.id) ?? [] })))
+      } catch (e) {
+        console.error('Failed to load recently viewed listings:', e)
+        if (!cancelled) setError('Failed to load data. Please try again.')
+      }
     })()
     return () => { cancelled = true }
   }, [])
 
+  if (error) return <p className="mb-6 text-sm text-[var(--error)]">{error}</p>
   if (recent.length === 0) return null
 
   return (

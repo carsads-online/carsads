@@ -19,6 +19,7 @@ export function DetailView({ id, onBack, onEdit, onOpen, onMessage }: {
   const [photoIdx, setPhotoIdx] = useState(0)
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   const [similar, setSimilar] = useState<ListingWithPhotos[]>([])
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -27,21 +28,23 @@ export function DetailView({ id, onBack, onEdit, onOpen, onMessage }: {
     setSimilar([])
     setPhotoIdx(0)
     setLightboxIdx(null)
+    setError(null)
     ;(async () => {
-      const [rows, photos, fav] = await Promise.all([
+      try {
+        const [rows, photos, fav] = await Promise.all([
         dbQuery<Listing>(`SELECT * FROM listings WHERE id = ? LIMIT 1`, [id]),
         dbQuery<ListingPhoto>(`SELECT * FROM listing_photos WHERE listing_id = ? ORDER BY position ASC`, [id]),
         app.kv.get(`fav:${id}`).catch(() => null),
       ])
-      if (cancelled) return
-      const l = rows[0]
-      if (!l) { setData('missing'); return }
-      setData({ ...l, photos })
-      setMe(app.auth.user?.id ?? null)
-      setSaved(!!fav)
+        if (cancelled) return
+        const l = rows[0]
+        if (!l) { setData('missing'); return }
+        setData({ ...l, photos })
+        setMe(app.auth.user?.id ?? null)
+        setSaved(!!fav)
 
-      // Record in recently-viewed (KV-backed, deduped, last 10).
-      try {
+        // Record in recently-viewed (KV-backed, deduped, last 10).
+        try {
         const raw = await app.kv.get<unknown>('recent')
         const prev: { id: string; ts: number }[] = Array.isArray(raw)
           ? raw.filter((r): r is { id: string; ts: number } =>
@@ -50,30 +53,34 @@ export function DetailView({ id, onBack, onEdit, onOpen, onMessage }: {
           : []
         const next = [{ id, ts: Date.now() }, ...prev.filter(r => r.id !== id)].slice(0, 10)
         await app.kv.set('recent', next)
-      } catch {
-        // non-fatal — recently-viewed is a soft feature
-      }
+        } catch {
+          // non-fatal — recently-viewed is a soft feature
+        }
 
-      // Fetch similar listings: same make OR same body_type, exclude self.
-      const similarRows = await dbQuery<Listing>(
+        // Fetch similar listings: same make OR same body_type, exclude self.
+        const similarRows = await dbQuery<Listing>(
         `SELECT * FROM listings
          WHERE status = 'active' AND id != ?
            AND (make = ? OR body_type = ?)
          ORDER BY created_at DESC LIMIT 3`,
         [l.id, l.make, l.body_type],
-      )
-      if (cancelled || similarRows.length === 0) return
-      const similarIds = similarRows.map(r => r.id)
-      const similarPhotos = await dbQuery<ListingPhoto>(
+        )
+        if (cancelled || similarRows.length === 0) return
+        const similarIds = similarRows.map(r => r.id)
+        const similarPhotos = await dbQuery<ListingPhoto>(
         `SELECT * FROM listing_photos WHERE listing_id IN (${similarIds.map(() => '?').join(',')}) ORDER BY position ASC`,
         similarIds,
-      )
-      const byId = new Map<string, ListingPhoto[]>()
-      for (const p of similarPhotos) {
-        if (!byId.has(p.listing_id)) byId.set(p.listing_id, [])
-        byId.get(p.listing_id)!.push(p)
+        )
+        const byId = new Map<string, ListingPhoto[]>()
+        for (const p of similarPhotos) {
+          if (!byId.has(p.listing_id)) byId.set(p.listing_id, [])
+          byId.get(p.listing_id)!.push(p)
+        }
+        if (!cancelled) setSimilar(similarRows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
+      } catch (e) {
+        console.error('Failed to load listing:', e)
+        if (!cancelled) setError('Failed to load data. Please try again.')
       }
-      if (!cancelled) setSimilar(similarRows.map(r => ({ ...r, photos: byId.get(r.id) || [] })))
     })()
     return () => { cancelled = true }
   }, [id])
@@ -104,6 +111,14 @@ export function DetailView({ id, onBack, onEdit, onOpen, onMessage }: {
     }
   }
 
+  if (error) {
+    return (
+      <div>
+        <BackButton onClick={onBack} />
+        <EmptyState title="Could not load listing" hint={error} />
+      </div>
+    )
+  }
   if (data === null) return <CenterMessage text="Loading listing…" />
   if (data === 'missing') {
     return (
